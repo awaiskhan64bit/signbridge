@@ -59,14 +59,11 @@ class Controller(QObject):
     stateChanged = Signal()
     phraseChanged = Signal()
     historyChanged = Signal()
-    errorRaised = Signal(str)
-    spokeText = Signal(str)
 
     def __init__(self, settings: Settings, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.settings = settings
         self._history: list[dict] = []
-        self._phrase = ""
         self._frame_id = 0
         self._state = EngineState()
         self._recognizer = self._build_recognizer()
@@ -78,7 +75,6 @@ class Controller(QObject):
             on_frame=self._on_frame,
             on_event=self._on_event,
         )
-        self.engine.speech.on_spoken = self._on_spoken
 
     @Property(int, notify=frameReady)
     def frameId(self) -> int:
@@ -137,7 +133,6 @@ class Controller(QObject):
     def _on_event(self, event: DecodedEvent) -> None:
         if event.kind is Event.SIGN and event.label:
             # Keep the running phrase visible in the UI as it builds up.
-            self._phrase = self.engine.decoder.phrase
             self.phraseChanged.emit()
         elif event.kind is Event.PHRASE and event.text:
             self._history.insert(
@@ -149,12 +144,8 @@ class Controller(QObject):
                 },
             )
             del self._history[40:]
-            self._phrase = ""
             self.phraseChanged.emit()
             self.historyChanged.emit()
-
-    def _on_spoken(self, text: str) -> None:
-        self.spokeText.emit(text)
 
     # ------------------------------------------------------------ properties
 
@@ -299,7 +290,6 @@ class Controller(QObject):
     @Slot()
     def clearPhrase(self) -> None:
         self.engine.clear_phrase()
-        self._phrase = ""
         self.phraseChanged.emit()
 
     @Slot()
@@ -372,22 +362,6 @@ class Controller(QObject):
             return
         self.engine.switch_source(Source.VIDEO, path)
         self.settings.save()
-        self.stateChanged.emit()
-
-    @Slot(str)
-    def previewPhrase(self, text: str) -> None:
-        """Speak something without a sign, used by the voice tester."""
-
-        self.engine.speech.say(text)
-
-    @Slot(result=str)
-    def settingsPath(self) -> str:
-        return str(Settings.path())
-
-    @Slot()
-    def reloadRecognizer(self) -> None:
-        self._recognizer = self._build_recognizer()
-        self.engine.set_recognizer(self._recognizer)
         self.stateChanged.emit()
 
 

@@ -1,12 +1,10 @@
-module SignBridge
+﻿module SignBridge
 
 singleton Theme 1.0 Theme.qml
 
 Card 1.0 components/Card.qml
 StatChip 1.0 components/StatChip.qml
 ConfidenceRing 1.0 components/ConfidenceRing.qml
-BarMeter 1.0 components/BarMeter.qml
-Pill 1.0 components/Pill.qml
 GhostButton 1.0 components/GhostButton.qml
 AccentButton 1.0 components/AccentButton.qml
 ToggleRow 1.0 components/ToggleRow.qml

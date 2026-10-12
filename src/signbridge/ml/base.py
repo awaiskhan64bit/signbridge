@@ -39,15 +39,6 @@ class Recognizer(abc.ABC):
         return self.name
 
 
-class NullRecognizer(Recognizer):
-    """The app still runs (camera, HUD, speech) when no model is installed."""
-
-    name = "no model loaded"
-
-    def predict(self, window: np.ndarray) -> SignPrediction:
-        return SignPrediction(label="", confidence=0.0)
-
-
 # Labels the pipeline treats specially rather than speaking.
 IGNORED_LABELS = frozenset({"", "none", "unknown", "silence", "no_gesture"})
 

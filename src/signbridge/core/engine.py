@@ -230,9 +230,6 @@ class SignEngine:
         if self.speech.last_spoken:
             self.speech.say(self.speech.last_spoken)
 
-    def stop_speech(self) -> None:
-        self.speech.clear()
-
     # ------------------------------------------------------------------ loop
 
     def _run(self) -> None:
