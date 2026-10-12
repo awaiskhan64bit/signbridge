@@ -79,6 +79,14 @@ word level sign language benchmark, using the official train/val/test splits.
 A two layer BiLSTM with attention pooling over hand landmarks, exported to ONNX
 so inference needs no deep learning framework at runtime.
 
+The shipped model covers all **1,992 WLASL words**, scores 13.4% top-1 and 33.9%
+top-5 on the held out test split, and runs a prediction in 1.5 ms on a laptop CPU.
+At that vocabulary size, with a median of six training clips per word, those are
+the honest numbers. The
+[precision when it chooses to speak](docs/results.md) table is the one that
+describes what the app actually does: it accepts about a third of what it sees
+and is right 22% of the time. It degrades into silence, not into nonsense.
+
 ```bash
 python scripts/fetch_wlasl.py       # ~430 MB of landmarks, once
 python scripts/train.py             # CPU, no GPU needed
@@ -136,7 +144,8 @@ Stated plainly, because a sign language tool that overstates what it does is
 worse than no tool:
 
 - **Accuracy is bounded by the data, not the code.** WLASL has around six clips
-  per word. No architecture fixes that.
+  per word. Words with nine or more training clips score 30.6% top-1; words with
+  three or fewer score 9.2%. That gap is the whole story.
 - **Two handed signs are hard.** The encoder uses the dominant hand, so signs
   that depend on both hands together lose information.
 - **Trained on video, run on a webcam.** Every landmark corpus available is phone

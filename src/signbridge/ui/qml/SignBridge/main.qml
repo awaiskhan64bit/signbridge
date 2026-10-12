@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
@@ -117,8 +117,13 @@ ApplicationWindow {
 
             StatChip {
                 label: "Engine"
-                value: app.recognizerKind === "neural" ? "ML" : "Rules"
-                accentColor: app.recognizerKind === "neural" ? Theme.good : Theme.warn
+                value: app.recognizerKind === "words" ? "WLASL" : "Gestures"
+                accentColor: app.recognizerKind === "words" ? Theme.good : Theme.violet
+            }
+            StatChip {
+                label: "Vocab"
+                value: app.recognizerKind === "words" ? "1,992 words" : "6 gestures"
+                accentColor: Theme.textFaint
             }
             StatChip {
                 label: "Voice"
@@ -502,6 +507,52 @@ ApplicationWindow {
                     width: parent.width
                     spacing: 12
 
+                    Text {
+                        text: "Vocabulary"
+                        color: Theme.textFaint
+                        font.family: Theme.sans
+                        font.pixelSize: Theme.fontMicro
+                        font.letterSpacing: 1.0
+                    }
+
+                    Segmented {
+                        Layout.fillWidth: true
+                        current: app.recognizerKind
+                        options: [
+                            { value: "words",    label: "WLASL words" },
+                            { value: "gestures", label: "Gestures" },
+                            { value: "auto",     label: "Auto" }
+                        ]
+                        onPicked: (value) => app.setRecognizer(value)
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: app.recognizerKind === "words"
+                        text: app.recognizerLabel
+                        color: Theme.textFaint
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.fontMicro
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: app.recognizerKind === "words"
+                              ? "Trained on WLASL. Silent unless confident, which on a webcam it usually will not be."
+                              : "Six static gestures from hand shape. Works in demo mode and needs no model."
+                        color: Theme.textFaint
+                        font.family: Theme.sans
+                        font.pixelSize: Theme.fontMicro
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: Theme.stroke
+                    }
+
                     Segmented {
                         Layout.fillWidth: true
                         current: app.ttsEngine
@@ -520,7 +571,7 @@ ApplicationWindow {
                         to: 1.6
                         stepSize: 0.05
                         value: app.ttsRate
-                        onValueChanged: (v) => app.setRate(v)
+                        onMoved: (v) => app.setRate(v)
                     }
 
                     SliderRow {
@@ -530,7 +581,7 @@ ApplicationWindow {
                         to: 1.0
                         stepSize: 0.05
                         value: app.ttsVolume
-                        onValueChanged: (v) => app.setVolume(v)
+                        onMoved: (v) => app.setVolume(v)
                     }
 
                     SliderRow {
@@ -540,7 +591,7 @@ ApplicationWindow {
                         to: 0.95
                         stepSize: 0.01
                         value: app.minConfidence
-                        onValueChanged: (v) => app.setMinConfidence(v)
+                        onMoved: (v) => app.setMinConfidence(v)
                     }
 
                     RowLayout {
@@ -588,11 +639,6 @@ ApplicationWindow {
     }
 
     // ------------------------------------------------------------------ wire
-
-    Connections {
-        target: app
-        function onErrorRaised(message) { console.warn("SignBridge:", message) }
-    }
 
     Shortcut {
         sequence: "Space"

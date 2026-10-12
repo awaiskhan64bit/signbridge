@@ -8,6 +8,7 @@ because everything on this object lives on the GUI thread.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -66,6 +67,10 @@ class Controller(QObject):
         self._history: list[dict] = []
         self._frame_id = 0
         self._state = EngineState()
+
+        # A user can pin an engine, otherwise the source picks: demo mode uses
+        # the gesture rules, a camera or a clip uses the trained model.
+        self._recognizer_kind = getattr(settings, "recognizer", "") or "auto"
         self._recognizer = self._build_recognizer()
         self.provider = FrameProvider()
 
@@ -84,13 +89,38 @@ class Controller(QObject):
 
     # ------------------------------------------------------------ recognizer
 
-    def _build_recognizer(self) -> Recognizer:
-        """Prefer a trained model, fall back to the built in gesture rules."""
+    def _resolve_kind(self, kind: str) -> str:
+        """Turn 'auto' into a concrete engine based on the current source."""
+
+        if kind != "auto":
+            return kind
+        try:
+            source = Source(self.settings.source)
+        except ValueError:
+            source = Source.CAMERA
+        return "gestures" if source is Source.SIMULATED else "words"
+
+    def _build_recognizer(self, kind: str | None = None) -> Recognizer:
+        """Build a recogniser by name.
+
+        Two vocabularies ship, and they are not interchangeable. The neural model
+        knows WLASL words but has never seen the synthetic hand rig, so pointing
+        it at demo mode would leave it permanently silent. The rule based
+        recogniser knows the rig's six gestures and nothing else. So the source
+        decides, unless the user has pinned an engine.
+        """
+
+        kind = self._resolve_kind(kind or self._recognizer_kind)
+
+        if kind == "gestures":
+            return GestureRecognizer(self.settings.min_sign_confidence)
 
         model = Path(self.settings.models_dir) / "sign_classifier.onnx"
         neural = NeuralRecognizer.try_load(model, self.settings.min_sign_confidence)
         if neural is not None and neural.ready:
             return neural
+        # No trained model present. Falling back keeps the app usable, and the
+        # UI shows which engine is actually running rather than claiming ML.
         return GestureRecognizer(self.settings.min_sign_confidence)
 
     @Property(str, notify=stateChanged)
@@ -99,7 +129,14 @@ class Controller(QObject):
 
     @Property(str, notify=stateChanged)
     def recognizerKind(self) -> str:
-        return "neural" if isinstance(self._recognizer, NeuralRecognizer) else "rules"
+        return self._recognizer_kind
+
+    @Property(bool, notify=stateChanged)
+    def neuralAvailable(self) -> bool:
+        """Whether a trained model is on disk. Drives whether the words option is
+        offered at all."""
+
+        return (Path(self.settings.models_dir) / "sign_classifier.onnx").exists()
 
     # ------------------------------------------------------------- telemetry
 
@@ -281,7 +318,26 @@ class Controller(QObject):
             return
         self.engine.switch_source(source)
         self.settings.save()
+        # The synthetic signer is not WLASL vocabulary, so let the engine follow
+        # the source unless the user has pinned a specific one.
+        if self._recognizer_kind == "auto":
+            self._apply_kind("gestures" if source is Source.SIMULATED else "words")
         self.stateChanged.emit()
+
+    @Slot(str)
+    def setRecognizer(self, kind: str) -> None:
+        """Pin an engine, or hand the choice back to the source."""
+
+        if kind not in ("auto", "words", "gestures"):
+            return
+        self.settings.recognizer = kind
+        self.settings.save()
+        self._apply_kind(kind)
+        self.stateChanged.emit()
+
+    def _apply_kind(self, kind: str) -> None:
+        self._recognizer_kind = kind
+        self.engine.set_recognizer(self._build_recognizer(kind))
 
     @Slot()
     def flushPhrase(self) -> None:
@@ -318,16 +374,36 @@ class Controller(QObject):
         self.stateChanged.emit()
 
     @Slot(float)
+    def setMinConfidence(self, value: float) -> None:
+        self._set_float("min_sign_confidence", value, 0.30, 0.95)
+
+    @Slot(float)
     def setRate(self, rate: float) -> None:
-        self.settings.tts_rate = rate
+        self._set_float("tts_rate", rate, 0.6, 1.6)
         self.engine.set_settings(self.settings)
         self.settings.save()
 
     @Slot(float)
     def setVolume(self, volume: float) -> None:
-        self.settings.tts_volume = volume
-        self.engine.speech.player.set_volume(volume)
+        self._set_float("tts_volume", volume, 0.0, 1.0)
+        self.engine.speech.player.set_volume(self.settings.tts_volume)
         self.settings.save()
+
+    def _set_float(self, name: str, value: float, low: float, high: float) -> None:
+        """Clamp and reject before anything is persisted.
+
+        QML bindings can deliver a value before it is meaningful. A NaN written
+        here would survive a restart and quietly disable recognition, because
+        every later comparison against it is false.
+        """
+
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(number):
+            return
+        setattr(self.settings, name, max(low, min(high, number)))
 
     @Slot(bool)
     def setAutoSpeak(self, on: bool) -> None:
@@ -342,18 +418,6 @@ class Controller(QObject):
     @Slot(bool)
     def setSkeleton(self, on: bool) -> None:
         self.settings.show_skeleton = on
-        self.settings.save()
-
-    @Slot(float)
-    def setMinConfidence(self, value: float) -> None:
-        self.settings.min_sign_confidence = value
-        self.engine.set_recognizer(
-            self._recognizer
-            if isinstance(self._recognizer, GestureRecognizer)
-            else NeuralRecognizer.try_load(
-                Path(self.settings.models_dir) / "sign_classifier.onnx", value
-            )
-        )
         self.settings.save()
 
     @Slot(str)

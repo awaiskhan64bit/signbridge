@@ -8,6 +8,7 @@ app is fully usable before the file is ever written.
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -50,6 +51,7 @@ class Settings:
     window_frames: int = 48
     signs_per_phrase: int = 0  # 0 means speak every confirmed sign on its own
     phrase_pause_ms: float = 900.0
+    recognizer: str = "auto"  # auto | words | gestures
 
     # Speech
     tts_engine: str = "piper"  # "piper" | "sapi" | "off"
@@ -74,6 +76,14 @@ class Settings:
 
     @classmethod
     def load(cls) -> Settings:
+        """Load settings, discarding anything unusable.
+
+        The float fields are sanitised rather than trusted. A single NaN written
+        into the threshold would make every confidence comparison false and
+        silently disable all recognition, with nothing logged and no error. That
+        is exactly the sort of failure this guards against.
+        """
+
         p = cls.path()
         if not p.exists():
             return cls()
@@ -81,8 +91,31 @@ class Settings:
             raw: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return cls()
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in raw.items() if k in known})
+
+        defaults = cls()
+        clean: dict[str, Any] = {}
+        for f in fields(cls):
+            if f.name not in raw:
+                continue
+            value = raw[f.name]
+            default = getattr(defaults, f.name)
+            if isinstance(default, bool):
+                clean[f.name] = bool(value)
+            elif isinstance(default, float):
+                try:
+                    number = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(number):
+                    clean[f.name] = number
+            elif isinstance(default, int):
+                try:
+                    clean[f.name] = int(value)
+                except (TypeError, ValueError):
+                    continue
+            elif isinstance(default, str):
+                clean[f.name] = str(value)
+        return cls(**clean)
 
     def save(self) -> None:
         try:

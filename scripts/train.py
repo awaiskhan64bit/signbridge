@@ -48,6 +48,7 @@ if TYPE_CHECKING:  # torch is imported lazily, it is a training-only dependency
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from signbridge.ml.calibration import calibrate, precision_at  # noqa: E402
 from signbridge.ml.dataset import (  # noqa: E402
     WINDOW,
     WLASLIndex,
@@ -152,32 +153,6 @@ def class_weights(labels: np.ndarray, num_classes: int, power: float) -> torch.T
     if weights.sum() == 0:
         return torch.ones(num_classes)
     return torch.tensor(weights / weights.mean(), dtype=torch.float32)
-
-
-def best_threshold(probs: np.ndarray, labels: np.ndarray) -> tuple[float, float, float]:
-    """Pick the confidence cut that maximises accuracy among accepted guesses.
-
-    Accepting fewer predictions is only worth it if those predictions are more
-    often right, so this measures exactly that trade rather than plain accuracy.
-    """
-
-    top = probs.max(axis=1)
-    pred = probs.argmax(axis=1)
-    correct = (pred == labels).astype(np.float32)
-    order = np.argsort(-top)
-
-    best = (0.5, 0.0, 0.0)
-    n = len(order)
-    running_correct = 0.0
-    for k in range(1, n + 1):
-        running_correct += float(correct[order[k - 1]])
-        accepted = k / n
-        accuracy = running_correct / k
-        # Favour covering a decent share of inputs, not just the easiest few.
-        score = accuracy * min(1.0, accepted / 0.35)
-        if score > best[1]:
-            best = (float(top[order[k - 1]]), float(accuracy), float(accepted))
-    return best
 
 
 # ---------------------------------------------------------------------- main
@@ -332,7 +307,7 @@ def main() -> int:
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimiser.step()
             scheduler.step()
-            total += float(loss) * len(sel)
+            total += loss.item() * len(sel)
             seen += len(sel)
 
         acc1, acc5, _ = evaluate(val_windows, y_val)
@@ -358,15 +333,17 @@ def main() -> int:
     model.load_state_dict(best_state)
     test1, test5, test_probs = evaluate(test_windows, y_test)
     _, _, val_probs = evaluate(val_windows, y_val)
-    threshold, accept_acc, accept_cov = best_threshold(val_probs, y_val)
-    _, thresh_test_acc, thresh_test_cov = best_threshold(test_probs, y_test)
+
+    # Calibrate on validation, never on test. The test numbers below are what the
+    # chosen cut actually buys, measured on data the cut never saw.
+    fitted = calibrate(val_probs, y_val)
+    threshold = fitted.threshold
+    test_cov, test_prec = precision_at(test_probs, y_test, threshold)
 
     print(f"\nbest epoch {best_epoch}, val top1 {best_acc:.3f}")
     print(f"test top1 {test1:.3f}  top5 {test5:.3f}")
-    print(
-        f"threshold {threshold:.2f}: accepts {accept_cov:.0%} of clips at "
-        f"{accept_acc:.0%} accuracy (test: {thresh_test_cov:.0%} at {thresh_test_acc:.0%})"
-    )
+    print(f"val  {fitted.describe()}")
+    print(f"test {test_cov:.1%} coverage at {test_prec:.1%} precision")
 
     OUT.mkdir(parents=True, exist_ok=True)
     onnx_path = OUT / "sign_classifier.onnx"
@@ -398,10 +375,10 @@ def main() -> int:
             "val_top1": float(best_acc),
             "test_top1": float(test1),
             "test_top5": float(test5),
-            "accept_accuracy": float(accept_acc),
-            "accept_coverage": float(accept_cov),
-            "accept_accuracy_test": float(thresh_test_acc),
-            "accept_coverage_test": float(thresh_test_cov),
+            "accept_accuracy": float(fitted.precision),
+            "accept_coverage": float(fitted.coverage),
+            "accept_accuracy_test": float(test_prec),
+            "accept_coverage_test": float(test_cov),
             "params": int(n_params),
             "epochs_trained": int(best_epoch),
             "train_clips": len(train_s),

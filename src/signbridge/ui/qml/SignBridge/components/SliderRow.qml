@@ -11,6 +11,13 @@ Row {
     property real stepSize: 0.05
     property real value: 1.0
 
+    // Emitted only when the user actually moves the slider. A plain value
+    // change also fires when the binding is first evaluated, and at that point
+    // the value is not always meaningful. Emitting that back into the settings
+    // once wrote a NaN into the persisted threshold, which silently disabled
+    // every later confidence comparison.
+    signal moved(real value)
+
     spacing: 14
 
     Text {
@@ -31,8 +38,13 @@ Row {
         from: root.from
         to: root.to
         stepSize: root.stepSize
+        // Bind one way. Writing root.value back from here would fight the
+        // binding and, worse, persist a not-yet-meaningful value on startup.
         value: root.value
-        onMoved: root.value = value
+        onMoved: {
+            root.value = value
+            root.moved(value)
+        }
 
         background: Rectangle {
             x: slider.leftPadding

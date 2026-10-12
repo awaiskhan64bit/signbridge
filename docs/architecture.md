@@ -114,7 +114,7 @@ degrades gracefully. The tradeoff curve is in [results.md](results.md).
 | Choice | Alternative | Why |
 | --- | --- | --- |
 | PySide6 / Qt Quick | Electron, Tkinter | Qt Quick renders at 60 fps on the GPU, so a 30 fps camera feed costs almost nothing to display. No Node toolchain needed. |
-| ONNX Runtime | PyTorch, TensorRT | A few MB of weights, no framework at runtime, CPU inference well under a millisecond. TensorRT needs a GPU. |
+| ONNX Runtime | PyTorch, TensorRT | A few MB of weights, no framework at runtime, and 1.5 ms per window on CPU for the full two thousand class head. TensorRT needs a GPU. |
 | Piper | Coqui, Kokoro | Piper ships one abi3 wheel with espeak-ng bundled and no torch. Coqui does not support Python 3.12. Kokoro drags in about 2 GB of dependencies. |
 
 MediaPipe on Windows runs CPU only; GPU support was removed upstream. For this
