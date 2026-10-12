@@ -101,6 +101,19 @@ tests/         feature and decoder invariants
 docs/          architecture, results, licensing
 ```
 
+## Pushing a fork
+
+If you cloned rather than being the original author, or you want to attach a
+remote to an existing checkout:
+
+```bash
+git remote add origin https://github.com/awaiskhan64bit/signbridge.git
+git push -u origin main
+```
+
+Git will prompt for a Personal Access Token (Settings, Developer settings,
+Personal access tokens, Tokens classic, scope `repo`) instead of a password.
+
 ## Tests
 
 ```bash

@@ -88,23 +88,39 @@ class GestureRecognizer(Recognizer):
 
     @staticmethod
     def _score(curls: np.ndarray, reach: np.ndarray) -> np.ndarray:
-        """Soft membership per gesture, ordered to match LABELS."""
+        """Soft membership per gesture, ordered to match LABELS.
 
-        def step(value: float, threshold: float) -> float:
-            """1 when clearly past the threshold, fading to 0 by twice past it."""
-            margin = abs(threshold) * 0.6 + 0.05
-            return float(np.clip((value - threshold) / margin + 0.5, 0.0, 1.0))
+        Each test reads 0.5 exactly at its threshold and reaches 1.0 a fixed
+        distance past it. That distance is what stops a clearly folded finger
+        from scoring only 0.85 and dragging a whole product of three below the
+        acceptance cut, while keeping the scores far enough apart for the
+        confidence readout to mean something.
+        """
 
-        def absent(value: float, threshold: float) -> float:
-            return 1.0 - step(value, threshold)
+        def step(value: float, threshold: float, clear: float) -> float:
+            return float(np.clip((value - threshold) / clear + 0.5, 0.0, 1.0))
+
+        def absent(value: float, threshold: float, clear: float) -> float:
+            return 1.0 - step(value, threshold, clear)
+
+        # Curls run from 0.0 fully extended to about 0.47 closed, so a fifth of
+        # the range is a sensible "clearly past". Thumb reach runs 0.7 to 1.1.
+        curl_clear = 0.20
+        reach_clear = 0.25
+
+        def folded(value: float) -> float:
+            return step(value, FOLDED, curl_clear)
+
+        def straight(value: float) -> float:
+            return absent(value, STRAIGHT, curl_clear)
 
         _thumb, index, middle, ring, pinky = curls
-        four = np.array([index, middle, ring, pinky], dtype=np.float32)
+        four = (index, middle, ring, pinky)
 
-        all_straight = float(np.all(four <= STRAIGHT))
-        all_folded = float(np.all(four >= FOLDED))
-        thumb_out = step(reach[0], THUMB_OUT)
-        thumb_tucked = absent(reach[0], THUMB_TUCKED)
+        all_straight = float(all(v <= STRAIGHT for v in four))
+        all_folded = float(all(v >= FOLDED for v in four))
+        thumb_out = step(reach[0], THUMB_OUT, reach_clear)
+        thumb_tucked = absent(reach[0], THUMB_TUCKED, reach_clear)
 
         return np.array(
             [
@@ -113,22 +129,13 @@ class GestureRecognizer(Recognizer):
                 # closed_fist: everything folded and the thumb across the fingers.
                 all_folded * thumb_tucked,
                 # pointing_up: only the index left.
-                absent(index, STRAIGHT)
-                * step(middle, FOLDED)
-                * step(ring, FOLDED)
-                * step(pinky, FOLDED),
+                straight(index) * folded(middle) * folded(ring) * folded(pinky),
                 # thumbs_up: fist plus an extended thumb.
                 all_folded * thumb_out,
                 # victory: index and middle only.
-                absent(index, STRAIGHT)
-                * absent(middle, STRAIGHT)
-                * step(ring, FOLDED)
-                * step(pinky, FOLDED),
+                straight(index) * straight(middle) * folded(ring) * folded(pinky),
                 # i_love_you: index and pinky, middle and ring folded.
-                absent(index, STRAIGHT)
-                * absent(pinky, STRAIGHT)
-                * step(middle, FOLDED)
-                * step(ring, FOLDED),
+                straight(index) * straight(pinky) * folded(middle) * folded(ring),
             ],
             dtype=np.float32,
         )

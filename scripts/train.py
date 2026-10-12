@@ -364,6 +364,10 @@ def main() -> int:
         output_names=["logits"],
         dynamic_axes={"window": {0: "batch"}, "logits": {0: "batch"}},
         opset_version=17,
+        # PyTorch 2.9+ defaults to the torch.export exporter, which wants
+        # onnxscript installed for ops the LSTM lowers to. The TorchScript
+        # exporter only needs onnx, which we already have.
+        dynamo=False,
     )
 
     meta = {

@@ -25,6 +25,10 @@ class ModelNotFound(FileNotFoundError):
     pass
 
 
+class ModelMismatch(RuntimeError):
+    """The graph and its metadata disagree about the shape of the problem."""
+
+
 class NeuralRecognizer(Recognizer):
     """Runs the trained classifier over a window of encoded landmarks."""
 
@@ -136,7 +140,18 @@ class NeuralRecognizer(Recognizer):
         batch = np.ascontiguousarray(batch)
 
         logits = self._session.run(None, {self._input_name: batch})[0]
-        scores = np.asarray(logits, dtype=np.float32).reshape(-1)
+        scores = np.asarray(logits, dtype=np.float32)
+
+        # Inference always feeds a batch of one, so the graph must return exactly
+        # one value per label. A shape that is merely a multiple would mean the
+        # model and its metadata disagree, and guessing would silently mislabel
+        # every prediction, so fail loudly instead.
+        if scores.size != len(self._labels):
+            raise ModelMismatch(
+                f"{self.model_path.name} returned {scores.size} values for a batch of "
+                f"one, but {self.meta_path.name} lists {len(self._labels)} labels"
+            )
+        scores = scores.reshape(-1)
 
         # The graph may already emit probabilities, so only softmax when it does not.
         already_normalised = scores.min() >= -1e-6 and abs(float(scores.sum()) - 1.0) < 1e-2
