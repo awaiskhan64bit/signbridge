@@ -96,7 +96,14 @@ class Glossary:
 
     @classmethod
     def display(cls, label: str) -> str:
-        """What to show on screen. Spelled letters keep their casing."""
+        """What to show on screen.
+
+        Dataset labels are lowercase and sometimes multi-word ("thank you"), and
+        the live sign readout is the largest text in the UI, so it gets sentence
+        case rather than whatever the dataset happened to use.
+        """
 
         spoken = cls.say(label)
-        return spoken if spoken else label.replace("_", " ").upper()
+        if spoken:
+            return spoken if spoken.isupper() else spoken[:1].upper() + spoken[1:]
+        return label.replace("_", " ").upper()

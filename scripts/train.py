@@ -55,6 +55,7 @@ from signbridge.ml.dataset import (  # noqa: E402
     encode_clip,
     fit_window,
     mixup,
+    resize_track,
 )
 from signbridge.ml.features import FEATURE_DIMS  # noqa: E402
 
@@ -109,8 +110,13 @@ def build_model(num_classes: int, hidden: int = 128, layers: int = 2, proj: int 
 
 def load_tracks(
     index: WLASLIndex, samples, cache: dict, workers: int = 8
-) -> np.ndarray:
-    """Encode clips once and cache them. Encoding is the slow part of training."""
+) -> list[np.ndarray]:
+    """Encode clips once and cache them. Encoding is the slow part of training.
+
+    Clips come back at their natural lengths, so this returns a list rather than
+    a stacked array. Everything that needs a fixed size window goes through
+    `fit_window` or `resize_track`.
+    """
 
     from concurrent.futures import ThreadPoolExecutor
 
@@ -120,7 +126,7 @@ def load_tracks(
         try:
             return sample.video_id, encode_clip(sample.path)
         except Exception:
-            return sample.video_id, np.zeros((WINDOW, FEATURE_DIMS), dtype=np.float32)
+            return sample.video_id, np.zeros((1, FEATURE_DIMS), dtype=np.float32)
 
     if todo:
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -128,7 +134,7 @@ def load_tracks(
                 cache[vid] = track
                 if i % 500 == 0:
                     print(f"  encoded {i}/{len(todo)}")
-    return np.stack([cache[s.video_id] for s in samples])
+    return [cache[s.video_id] for s in samples]
 
 
 def class_weights(labels: np.ndarray, num_classes: int, power: float) -> torch.Tensor:
@@ -164,13 +170,13 @@ def best_threshold(probs: np.ndarray, labels: np.ndarray) -> tuple[float, float,
     n = len(order)
     running_correct = 0.0
     for k in range(1, n + 1):
-        running_correct += correct[order[k - 1]]
+        running_correct += float(correct[order[k - 1]])
         accepted = k / n
         accuracy = running_correct / k
         # Favour covering a decent share of inputs, not just the easiest few.
         score = accuracy * min(1.0, accepted / 0.35)
         if score > best[1]:
-            best = (float(top[order[k - 1]]), accuracy, accepted)
+            best = (float(top[order[k - 1]]), float(accuracy), float(accepted))
     return best
 
 
@@ -251,13 +257,23 @@ def main() -> int:
     y_val = np.array([label_of[s.gloss] for s in val_s], dtype=np.int64)
     y_test = np.array([label_of[s.gloss] for s in test_s], dtype=np.int64)
 
-    # Standardise on the training set only.
-    flat = train_tracks.reshape(-1, FEATURE_DIMS)
+    # Standardise on the training set only, so the val and test numbers stay
+    # honest. Clips are variable length, so the statistics come from the
+    # concatenated frames rather than from a stack.
+    flat = np.concatenate(train_tracks, axis=0)
     mean = flat.mean(axis=0)
     std = flat.std(axis=0) + 1e-5
-    train_tracks = (train_tracks - mean) / std
-    val_tracks = (val_tracks - mean) / std
-    test_tracks = (test_tracks - mean) / std
+    del flat
+
+    def standardise(tracks):
+        return [(t - mean) / std for t in tracks]
+
+    def to_windows(tracks):
+        return np.stack([resize_track(t, args.window) for t in tracks])
+
+    train_tracks = standardise(train_tracks)
+    val_windows = to_windows(standardise(val_tracks))
+    test_windows = to_windows(standardise(test_tracks))
 
     model = build_model(num_classes, args.hidden, args.layers)
     n_params = sum(p.numel() for p in model.parameters())
@@ -319,7 +335,7 @@ def main() -> int:
             total += float(loss) * len(sel)
             seen += len(sel)
 
-        acc1, acc5, _ = evaluate(val_tracks, y_val)
+        acc1, acc5, _ = evaluate(val_windows, y_val)
         flag = ""
         if acc1 > best_acc:
             best_acc, best_epoch, stale = acc1, epoch, 0
@@ -340,8 +356,8 @@ def main() -> int:
         return 1
 
     model.load_state_dict(best_state)
-    test1, test5, test_probs = evaluate(test_tracks, y_test)
-    _, _, val_probs = evaluate(val_tracks, y_val)
+    test1, test5, test_probs = evaluate(test_windows, y_test)
+    _, _, val_probs = evaluate(val_windows, y_val)
     threshold, accept_acc, accept_cov = best_threshold(val_probs, y_val)
     _, thresh_test_acc, thresh_test_cov = best_threshold(test_probs, y_test)
 
@@ -375,17 +391,22 @@ def main() -> int:
         "labels": glosses,
         "window": args.window,
         "features": FEATURE_DIMS,
-        "mean": mean.tolist(),
-        "std": std.tolist(),
-        "threshold": threshold,
+        "mean": [float(v) for v in mean],
+        "std": [float(v) for v in std],
+        "threshold": float(threshold),
         "metrics": {
-            "val_top1": best_acc,
-            "test_top1": test1,
-            "test_top5": test5,
-            "accept_accuracy": accept_acc,
-            "accept_coverage": accept_cov,
-            "params": n_params,
-            "epochs_trained": best_epoch,
+            "val_top1": float(best_acc),
+            "test_top1": float(test1),
+            "test_top5": float(test5),
+            "accept_accuracy": float(accept_acc),
+            "accept_coverage": float(accept_cov),
+            "accept_accuracy_test": float(thresh_test_acc),
+            "accept_coverage_test": float(thresh_test_cov),
+            "params": int(n_params),
+            "epochs_trained": int(best_epoch),
+            "train_clips": len(train_s),
+            "val_clips": len(val_s),
+            "test_clips": len(test_s),
         },
         "source": {
             "dataset": "WLASL via a7medwa2l/wlasl-signals (unlicensed mirror)",

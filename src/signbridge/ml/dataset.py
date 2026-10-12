@@ -183,6 +183,21 @@ def augment(track: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     return out.astype(np.float32)
 
 
+def resize_track(track: np.ndarray, window: int) -> np.ndarray:
+    """Stretch or squeeze a whole clip into exactly `window` frames.
+
+    Used for evaluation, where every frame of the clip is evidence and there is
+    no reason to crop. Training uses `fit_window` instead, which deliberately
+    crops so the model does not learn that a sign always spans the full window.
+    """
+
+    if len(track) == 0:
+        return np.zeros((window, FEATURE_DIMS), dtype=np.float32)
+    src = np.linspace(0, len(track) - 1, window)
+    idx = np.clip(np.round(src).astype(int), 0, len(track) - 1)
+    return track[idx].astype(np.float32)
+
+
 def fit_window(
     track: np.ndarray, window: int, rng: np.random.Generator | None = None
 ) -> np.ndarray:
