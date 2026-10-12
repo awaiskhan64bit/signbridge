@@ -23,6 +23,8 @@ dependencies = [
     # environment fight over the same cv2 module.
     "mediapipe>=1.1,<2",
     "numpy>=1.26,<3",
+    # Needed to run the trained classifier. Small, CPU only, no framework.
+    "onnxruntime>=1.18",
 ]
 
 [project.optional-dependencies]
@@ -30,11 +32,20 @@ dependencies = [
 tts = ["piper-tts>=1.8"]
 tts-fallback = ["pyttsx3>=2.90"]
 
+[dependency-groups]
+# torch is CPU only here and is a training-time dependency, not a runtime one.
+# Install it from the PyTorch CPU index: pip install torch --index-url
+# https://download.pytorch.org/whl/cpu
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "torch>=2.4",
+    "onnx>=1.16",
+]
+
 [project.scripts]
 signbridge = "signbridge.__main__:main"
-
-[dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
 
 [build-system]
 requires = ["hatchling"]
@@ -42,6 +53,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/signbridge"]
+
+# The QML module is loaded from disk at runtime, so it has to travel inside the
+# wheel. Without this it is silently left behind.
+[tool.hatch.build.targets.wheel.force-include]
+"src/signbridge/ui/qml" = "signbridge/ui/qml"
 
 [tool.ruff]
 line-length = 100
