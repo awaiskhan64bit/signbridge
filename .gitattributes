@@ -1,0 +1,19 @@
+# Normalise line endings in the repository, keep them native in the working
+# tree. Without this every file warns about LF becoming CRLF on Windows.
+* text=auto
+
+*.py    text eol=lf
+*.qml   text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+*.json  text eol=lf
+qmldir  text eol=lf
+
+# Windows scripts genuinely need CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Binary assets.
+*.onnx  binary
+*.png   binary
+*.task  binary

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node (only used for the optional dev tooling)
+node_modules/
+
+# SignBridge runtime artifacts
+assets/models/*
+!assets/models/.gitkeep
+assets/voices/*
+!assets/voices/.gitkeep
+data/
+*.onnx
+*.tflite
+*.task
+!assets/models/README.md
+
+# Recorded calibration / debug clips
+*.mp4
+*.avi
+captures/
+
+# Scratch files from local runs
+_shot.png
+_*.py
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.log
