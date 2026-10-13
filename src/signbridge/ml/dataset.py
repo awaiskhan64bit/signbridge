@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from ..core.types import LANDMARK_COUNT, Hand, Handedness
-from .features import FEATURE_DIMS, encode_hand, encode_sequence
+from .features import FEATURE_DIMS, FRAME_START, encode_hand, encode_sequence
 
 WINDOW = 64
 HANDS = 2
@@ -41,6 +41,11 @@ RAW_DIMS = HANDS * PER_HAND  # 126
 #: Offsets into the feature vector, used by the augmentation below.
 _COORDS = LANDMARK_COUNT * 3  # 63: normalised landmark coordinates
 _PALM_NORMAL = _COORDS + 10  # 73: after five curls and five reaches
+
+#: Columns inside the frame block appended by features.frame_features.
+_FRAME_X = FRAME_START
+_FRAME_Y = FRAME_START + 1
+_FRAME_DIR = FRAME_START + 2  # four columns: (cos, sin) x 2
 
 
 @dataclass(slots=True)
@@ -130,6 +135,23 @@ def _rotate_2d(points: np.ndarray, angle: float) -> np.ndarray:
     return points @ np.array([[c, s], [-s, c]], dtype=np.float32)
 
 
+def _rotate_directions(pairs: np.ndarray, angle: float) -> np.ndarray:
+    """Rotate the (cos, sin) direction columns of the frame block.
+
+    Each pair of adjacent columns is one unit vector, so it is turned about the
+    origin in its own two dimensional plane. Rows where the hand was missing are
+    all zero and stay zero, since rotating the origin is a no-op.
+    """
+
+    c, s = np.cos(angle), np.sin(angle)
+    x = pairs[:, 0::2]
+    y = pairs[:, 1::2]
+    out = pairs.copy()
+    out[:, 0::2] = x * c - y * s
+    out[:, 1::2] = x * s + y * c
+    return out.astype(np.float32)
+
+
 def augment(track: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     """One augmented copy of a feature track.
 
@@ -171,6 +193,30 @@ def augment(track: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     if rng.random() < 0.5:
         out[:, 0::3] *= -1.0
         out[:, _PALM_NORMAL : _PALM_NORMAL + 3] *= -1.0
+        out[:, _FRAME_X] = 1.0 - out[:, _FRAME_X]
+        out[:, _FRAME_DIR : _FRAME_DIR + 4] *= -1.0
+
+    # The frame block stores where the hand is and which way it points, so it has
+    # to move with the hand. Rotating the direction columns while leaving the
+    # canonical coordinates alone is what makes the two blocks stay consistent:
+    # the canonical block is already rotation free, so touching it here would
+    # invent a shape change that the rotation never produced.
+    if rng.random() < 0.8:
+        turn = rng.uniform(-0.35, 0.35)
+        out[:, _FRAME_DIR : _FRAME_DIR + 4] = _rotate_directions(
+            out[:, _FRAME_DIR : _FRAME_DIR + 4], turn
+        )
+
+    # Jitter the hand's position in the signing space, standing in for a signer
+    # who sits further forward, leans, or signs slightly off centre. WLASL is
+    # tightly cropped, so without this the model treats frame position as a
+    # reliable cue and then meets a webcam that frames the whole upper body.
+    out[:, _FRAME_X] = np.clip(
+        out[:, _FRAME_X] * rng.uniform(0.85, 1.2) + rng.normal(0.0, 0.03), -0.5, 1.5
+    )
+    out[:, _FRAME_Y] = np.clip(
+        out[:, _FRAME_Y] * rng.uniform(0.85, 1.2) + rng.normal(0.0, 0.03), -0.5, 1.5
+    )
 
     # Frame dropout, standing in for tracker flicker.
     if rng.random() < 0.35:

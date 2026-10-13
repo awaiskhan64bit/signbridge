@@ -138,7 +138,9 @@ def load_tracks(
     return [cache[s.video_id] for s in samples]
 
 
-def class_weights(labels: np.ndarray, num_classes: int, power: float) -> torch.Tensor:
+def class_weights(
+    labels: np.ndarray, num_classes: int, power: float, device: torch.device
+) -> torch.Tensor:
     """Mild inverse frequency weighting.
 
     The long tail of WLASL is severe, but fully balancing it lets two clip words
@@ -152,7 +154,7 @@ def class_weights(labels: np.ndarray, num_classes: int, power: float) -> torch.T
     weights = np.where(counts > 0, 1.0 / np.power(np.maximum(counts, 1.0), power), 0.0)
     if weights.sum() == 0:
         return torch.ones(num_classes)
-    return torch.tensor(weights / weights.mean(), dtype=torch.float32)
+    return torch.tensor(weights / weights.mean(), dtype=torch.float32, device=device)
 
 
 # ---------------------------------------------------------------------- main
@@ -173,13 +175,36 @@ def main() -> int:
     parser.add_argument("--patience", type=int, default=14)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto, cuda or cpu. Training only; the app always runs on the CPU.",
+    )
+    parser.add_argument("--save-pt", default="", help="also write a .pt checkpoint here")
     args = parser.parse_args()
 
     import torch
     from torch import nn
 
-    if args.threads:
-        torch.set_num_threads(args.threads)
+    # The GPU is for training. Inference deliberately never touches it, see
+    # ml/neural.py, so a missing or broken card costs training speed only.
+    device = torch.device("cpu")
+    if args.device != "cpu":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        elif args.device == "cuda":
+            print("CUDA requested but not available, falling back to CPU", file=sys.stderr)
+    if device.type == "cpu":
+        # Leave the cores to the encoder threads rather than oversubscribing them.
+        torch.set_num_threads(max(1, (args.threads or 4)))
+    else:
+        torch.set_num_threads(max(1, (args.threads or 4)))
+    print(f"training device: {device}")
+    if device.type == "cuda":
+        print(f"  {torch.cuda.get_device_name(0)}")
+
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
@@ -250,11 +275,11 @@ def main() -> int:
     val_windows = to_windows(standardise(val_tracks))
     test_windows = to_windows(standardise(test_tracks))
 
-    model = build_model(num_classes, args.hidden, args.layers)
+    model = build_model(num_classes, args.hidden, args.layers).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model: {n_params:,} parameters, {num_classes} classes")
 
-    weights = class_weights(y_train, num_classes, args.weight_power)
+    weights = class_weights(y_train, num_classes, args.weight_power, device)
     criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=args.label_smoothing)
     optimiser = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
@@ -264,13 +289,16 @@ def main() -> int:
         steps_per_epoch=max(1, len(train_s) // args.batch),
     )
 
-    y_t = torch.from_numpy(y_train)
+    y_t = torch.from_numpy(y_train).to(device)
+
+    def to_device(x: np.ndarray) -> torch.Tensor:
+        return torch.from_numpy(x).to(device, non_blocking=True)
 
     def evaluate(x: np.ndarray, y: np.ndarray) -> tuple[float, float, np.ndarray]:
         model.eval()
         with torch.no_grad():
-            logits = model(torch.from_numpy(x))
-            probs = torch.softmax(logits, dim=1).numpy()
+            logits = model(to_device(x))
+            probs = torch.softmax(logits, dim=1).cpu().numpy()
         top5 = np.argsort(-probs, axis=1)[:, :5]
         acc1 = float((top5[:, 0] == y).mean())
         acc5 = float((top5 == y[:, None]).any(axis=1).mean())
@@ -292,14 +320,14 @@ def main() -> int:
             targets = y_t[sel]
 
             if args.mixup > 0 and rng.random() < 0.5:
-                perm = torch.from_numpy(rng.permutation(len(sel)))
-                batch, lam = mixup(batch, batch[perm.numpy()], args.mixup, rng)
-                logits = model(torch.from_numpy(batch))
+                perm = torch.from_numpy(rng.permutation(len(sel))).to(device)
+                batch, lam = mixup(batch, batch[perm.cpu().numpy()], args.mixup, rng)
+                logits = model(to_device(batch))
                 loss = lam * criterion(logits, targets) + (1 - lam) * criterion(
                     logits, targets[perm]
                 )
             else:
-                logits = model(torch.from_numpy(batch))
+                logits = model(to_device(batch))
                 loss = criterion(logits, targets)
 
             optimiser.zero_grad()
@@ -345,6 +373,35 @@ def main() -> int:
     print(f"val  {fitted.describe()}")
     print(f"test {test_cov:.1%} coverage at {test_prec:.1%} precision")
 
+    if args.save_pt:
+        ckpt = Path(args.save_pt)
+        ckpt.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "state_dict": best_state,
+                "labels": glosses,
+                "window": args.window,
+                "features": FEATURE_DIMS,
+                "hidden": args.hidden,
+                "layers": args.layers,
+                "num_classes": num_classes,
+                "mean": mean,
+                "std": std,
+                "threshold": float(threshold),
+                "metrics": {
+                    "val_top1": float(best_acc),
+                    "test_top1": float(test1),
+                    "test_top5": float(test5),
+                },
+            },
+            ckpt,
+        )
+        print(f"wrote checkpoint {ckpt.name}")
+
+    # Export from a CPU copy. The app runs the graph through onnxruntime on the
+    # CPU, so tracing it while the weights sit on a CUDA device would bake device
+    # specific assumptions into the graph for no benefit.
+    model = model.to("cpu").eval()
     OUT.mkdir(parents=True, exist_ok=True)
     onnx_path = OUT / "sign_classifier.onnx"
 

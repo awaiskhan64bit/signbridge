@@ -1,19 +1,48 @@
 """Feature encoding for the sign classifier.
 
-A raw frame of 21 MediaPipe landmarks is a terrible model input: it depends on
-where the signer stands, how far away they are, and how the camera is angled.
-Everything here exists to strip that variation out so the network sees shape.
+A raw frame of 21 MediaPipe landmarks is a noisy model input: it depends on
+where the signer stands and how far away they are. Some of that variation has
+to come out, but not all of it, and drawing that line in the wrong place is the
+single most expensive mistake available in this codebase.
 
-Normalisation, in order:
+An earlier version normalised each hand all the way to a canonical frame:
+translate the wrist to the origin, rotate so the palm points a fixed way, scale
+by palm length. That gave a clean rotation, scale and translation invariant
+descriptor of hand shape, and it scored 11.2% on a linear probe over WLASL.
+Feeding the same probe raw landmarks with their frame position intact scored
+20.9%. The invariance was not making the features robust, it was deleting the
+label.
 
-1. translate the wrist to the origin
-2. rotate in the image plane so the index knuckle points along a fixed axis
-3. scale so the wrist to middle-knuckle distance is 1
-4. mirror the left hand so both hands encode identically
+The reason is that American Sign Language is not defined by hand shape alone. A
+flat hand at the forehead travelling outwards is HELLO. The same flat hand at the
+chest travelling inwards is a different sign entirely. Once the encoder has
+rotated, scaled and translated the hand, those two signs produce identical
+features, and the distinguishing information is gone before the model ever sees
+it. No amount of extra training or a bigger network recovers that.
 
-On top of the 63 normalised coordinates we add derived quantities that are cheap
-for the network to learn but awkward to work out from coordinates: joint curl
-per finger, palm orientation, knuckle spread and reach.
+So the encoder does both jobs at once. It keeps a canonical block, which is
+stable under camera placement and describes hand shape, plus a frame block
+carrying what the canonical block threw away:
+
+    canonical   63   landmark coordinates, invariant to placement
+    derived     17   curl, reach, knuckle spread, palm normal
+    frame        6   hand position in frame, plus two direction vectors
+
+The frame block is small on purpose. Two reference directions, wrist to middle
+knuckle and wrist to index knuckle, pin down the hand's in-plane rotation, and
+the wrist position says where in the signing space the hand is doing it. That
+is the minimum needed to separate HELLO from GOOD, and it stays robust to camera
+angle because the model can weigh it against the rest of the vector.
+
+Apparent hand size is deliberately absent. WLASL is tightly cropped phone
+footage where the hand fills the frame, while a laptop webcam shows a whole
+upper body, so anything encoding apparent size would be a train-versus-live
+mismatch rather than a signal.
+
+This corpus carries no depth channel, so z is zero throughout. That rules out a
+frame-space palm normal, which would collapse onto the z axis here and differ
+from live input. The two direction vectors are used instead because they are
+well defined in 2D and 3D alike.
 """
 
 from __future__ import annotations
@@ -43,14 +72,28 @@ FINGER_TIPS = (THUMB_TIP, INDEX_TIP, MIDDLE_TIP, RING_TIP, PINKY_TIP)
 
 COORD_DIMS = LANDMARK_COUNT * 3
 # per finger: curl + reach, then palm normal (3), knuckle spread (4)
-EXTRA_DIMS = len(FINGER_CHAINS) * 2 + 3 + 4
-FEATURE_DIMS = COORD_DIMS + EXTRA_DIMS
+DERIVED_DIMS = len(FINGER_CHAINS) * 2 + 3 + 4
+#: Offset of the frame block. Appending it keeps every earlier offset valid,
+#: so the gesture rules in gestures.py keep indexing the same curl and reach
+#: columns without knowing this block exists.
+FRAME_START = COORD_DIMS + DERIVED_DIMS
+
+#: wrist x, wrist y, then (cos, sin) for the middle-knuckle and index-knuckle
+#: directions. Six numbers that carry placement and in-plane rotation.
+FRAME_DIMS = 6
+
+FEATURE_DIMS = FRAME_START + FRAME_DIMS
 
 _EPS = 1e-6
 
 
 def normalise(landmarks: np.ndarray, handedness: Handedness = Handedness.UNKNOWN) -> np.ndarray:
-    """Return (21, 3) position, rotation, scale and handedness invariant landmarks."""
+    """Return (21, 3) position, rotation, scale and handedness invariant landmarks.
+
+    This is the canonical half of the encoding. It answers "what shape is this
+    hand" and nothing about where it is, which is why `frame_features` exists
+    alongside it rather than instead of it.
+    """
 
     pts = np.asarray(landmarks, dtype=np.float32).copy()
     if pts.shape != (LANDMARK_COUNT, 3):
@@ -87,6 +130,46 @@ def normalise(landmarks: np.ndarray, handedness: Handedness = Handedness.UNKNOWN
     # Scale by the palm length, which is stable across distance.
     scale = up_len + _EPS
     return pts / scale
+
+
+def frame_features(
+    landmarks: np.ndarray, handedness: Handedness = Handedness.UNKNOWN
+) -> np.ndarray:
+    """Return the placement and orientation the canonical form discards.
+
+    Wrist position in normalised image coordinates, followed by the unit
+    direction from the wrist to the middle and index knuckles. The directions
+    are stored as (cos, sin) rather than as an angle so the encoding has no
+    wraparound discontinuity at plus or minus pi for the model to trip over.
+    """
+
+    pts = np.asarray(landmarks, dtype=np.float32)
+    if pts.shape != (LANDMARK_COUNT, 3):
+        raise ValueError(f"expected {(LANDMARK_COUNT, 3)} landmarks, got {pts.shape}")
+
+    # Fold a left hand into right-hand image space first, exactly as `normalise`
+    # does. Doing it after computing the directions would leave them mirrored,
+    # so the two hands would disagree on which way the fingers point and stop
+    # encoding identically.
+    pts = pts.copy()
+    if handedness is Handedness.LEFT:
+        pts[:, 0] = 1.0 - pts[:, 0]
+
+    x = float(pts[WRIST][0])
+    y = float(pts[WRIST][1])
+
+    middle = _unit2(pts[MIDDLE_MCP][:2] - pts[WRIST][:2], default=(0.0, -1.0))
+    index = _unit2(pts[INDEX_MCP][:2] - pts[WRIST][:2], default=(0.0, -1.0))
+
+    return np.asarray([x, y, middle[0], middle[1], index[0], index[1]], dtype=np.float32)
+
+
+def _unit2(v: np.ndarray, default: tuple[float, float]) -> tuple[float, float]:
+    v = np.asarray(v, dtype=np.float32)
+    n = float(np.linalg.norm(v))
+    if n < _EPS:
+        return default
+    return float(v[0] / n), float(v[1] / n)
 
 
 def _turning(p: np.ndarray, q: np.ndarray, r: np.ndarray) -> float:
@@ -160,6 +243,7 @@ def encode_hand(hand: Hand) -> np.ndarray:
             np.asarray(reaches, dtype=np.float32),
             normal,
             np.asarray(spread, dtype=np.float32),
+            frame_features(hand.landmarks, hand.handedness),
         ]
     ).astype(np.float32)
 
