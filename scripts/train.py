@@ -48,6 +48,7 @@ if TYPE_CHECKING:  # torch is imported lazily, it is a training-only dependency
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from signbridge.ml import vocabulary  # noqa: E402
 from signbridge.ml.calibration import calibrate, precision_at  # noqa: E402
 from signbridge.ml.dataset import (  # noqa: E402
     WINDOW,
@@ -168,7 +169,14 @@ def main() -> int:
     parser.add_argument("--hidden", type=int, default=128)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--window", type=int, default=WINDOW)
-    parser.add_argument("--vocab", type=int, default=0, help="cap classes by frequency")
+    parser.add_argument("--vocab", type=int, default=0, help="cap classes by count")
+    parser.add_argument(
+        "--mode",
+        choices=("curated", "frequent"),
+        default="curated",
+        help="how --vocab selects words: a curated everyday list, or top-N by "
+        "clip count",
+    )
     parser.add_argument("--mixup", type=float, default=0.25)
     parser.add_argument("--label-smoothing", type=float, default=0.1)
     parser.add_argument("--weight-power", type=float, default=0.5)
@@ -221,17 +229,43 @@ def main() -> int:
     test_s = index.split("test")
     print(f"official splits: train {len(train_s)}, val {len(val_s)}, test {len(test_s)}")
 
-    # Optionally cap the vocabulary to the most frequent words. Rare words with
-    # two or three clips cannot be learned and only add noise to the softmax.
+    # Optionally narrow the vocabulary.
+    #
+    # `--mode curated` uses a hand-picked list of words people actually sign.
+    # `--mode frequent` keeps the old top-N-by-clip-count behaviour, which is
+    # retained only as a comparison: it ranked by how many clips WLASL happens to
+    # hold for a word, so "hello" (13 clips) fell outside the top 500 and the app
+    # could not say the most basic greeting at all.
     glosses = index.glosses
     if args.vocab:
         freq = Counter(s.gloss for s in train_s)
-        keep = {g for g, _ in freq.most_common(args.vocab)}
+        if args.mode == "curated":
+            wanted = vocabulary.resolve(index.glosses, args.vocab)
+            report = vocabulary.coverage_report(index.glosses)
+            print(
+                f"curated vocabulary: {len(wanted)} of {report['wanted']} requested "
+                f"words are present in WLASL"
+            )
+            if report["core_missing"]:
+                print(
+                    f"  core words absent from WLASL: {report['core_missing']}",
+                    file=sys.stderr,
+                )
+            keep = set(wanted)
+        else:
+            keep = {g for g, _ in freq.most_common(args.vocab)}
         glosses = [g for g in glosses if g in keep]
         train_s = [s for s in train_s if s.gloss in keep]
         val_s = [s for s in val_s if s.gloss in keep]
         test_s = [s for s in test_s if s.gloss in keep]
-        print(f"vocabulary capped to {len(glosses)} words")
+        clips = Counter(s.gloss for s in train_s)
+        print(f"vocabulary: {len(glosses)} words, {len(train_s)} train clips")
+        if clips:
+            per = sorted(clips.values())
+            print(
+                f"  clips per word: min {per[0]}, median {per[len(per) // 2]}, "
+                f"max {per[-1]}"
+            )
 
     label_of = {g: i for i, g in enumerate(glosses)}
     num_classes = len(glosses)
