@@ -30,6 +30,10 @@ captures/
 # Scratch files from local runs
 _shot.png
 _*.py
+_*.log
+_*.err
+_*.json
+_*.onnx
 
 # OS / editor
 .DS_Store

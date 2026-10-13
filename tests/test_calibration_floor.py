@@ -39,7 +39,7 @@ def test_a_mostly_wrong_model_is_told_to_stay_silent():
     scores /= scores.sum(axis=1, keepdims=True)
 
     fit = calibrate(scores, labels)
-    cov, prec = precision_at(scores, labels, fit.threshold)
+    cov, _ = precision_at(scores, labels, fit.threshold)
 
     top1 = float((scores.argmax(1) == labels).mean())
     assert top1 < 0.30, f"fixture is not a weak model, top1 {top1}"
