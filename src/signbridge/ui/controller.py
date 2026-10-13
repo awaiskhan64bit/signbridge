@@ -65,6 +65,7 @@ class Controller(QObject):
         super().__init__(parent)
         self.settings = settings
         self._history: list[dict] = []
+        self._last_clip: str | None = None
         self._frame_id = 0
         self._state = EngineState()
 
@@ -80,6 +81,10 @@ class Controller(QObject):
             on_frame=self._on_frame,
             on_event=self._on_event,
         )
+        # Share the engine's state object rather than keeping a private copy.
+        # A private one starts out with its own defaults, so the source selector
+        # read "Camera" until the first frame happened to arrive.
+        self._state = self.engine.state
 
     @Property(int, notify=frameReady)
     def frameId(self) -> int:
@@ -398,7 +403,11 @@ class Controller(QObject):
 
     @Slot(float)
     def setMinConfidence(self, value: float) -> None:
-        self._set_float("min_sign_confidence", value, 0.30, 0.95)
+        # The range has to reach well below the model's own calibrated cut, since
+        # real webcam input sits in a different domain and scores lower.
+        self._set_float("min_sign_confidence", value, 0.02, 0.95)
+        with self.engine._lock:
+            self.engine.recognizer = self._build_recognizer(self._recognizer_kind)
 
     @Slot(float)
     def setRate(self, rate: float) -> None:
@@ -466,13 +475,55 @@ class Controller(QObject):
             self._apply_kind("auto")
         self.stateChanged.emit()
 
-    @Slot()
+    @Slot(str)
     def useCamera(self) -> None:
         self.engine.switch_source(Source.CAMERA)
         self.settings.save()
         if self._recognizer_kind == "auto":
             self._apply_kind("auto")
         self.stateChanged.emit()
+
+    # ------------------------------------------------------------- recording
+
+    @Property(bool, notify=stateChanged)
+    def collecting(self) -> bool:
+        return self.engine.collecting
+
+    @Property(str, notify=stateChanged)
+    def collectingLabel(self) -> str:
+        return self.engine.collector.recording_label or ""
+
+    @Property(float, notify=stateChanged)
+    def collectProgress(self) -> float:
+        collector = self.engine.collector
+        if not collector.is_recording:
+            return 0.0
+        return min(1.0, collector.frames_have / max(1, collector.frames_needed))
+
+    @Property(int, notify=stateChanged)
+    def collectedClips(self) -> int:
+        return self.engine.collector.captured
+
+    @Slot(str)
+    def startRecording(self, label: str) -> None:
+        if self.engine.start_recording(label):
+            self.stateChanged.emit()
+
+    @Slot()
+    def stopRecording(self) -> None:
+        path = self.engine.stop_recording()
+        self._last_clip = path
+        self.stateChanged.emit()
+
+    @Slot()
+    def cancelRecording(self) -> None:
+        self.engine.cancel_recording()
+        self.stateChanged.emit()
+
+    @Slot(result=str)
+    def collectSummary(self) -> str:
+        summary = self.engine.collector.summary()
+        return f"{summary['clips']} clips across {summary['words']} words"
 
 
 def _to_qimage(rgb: np.ndarray) -> QImage:

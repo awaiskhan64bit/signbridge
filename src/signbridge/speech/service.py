@@ -206,6 +206,12 @@ def _select(kind: str, voices_dir, voice: str | None, rate: float, note: EngineN
             if voice
             else PiperEngine(voices_dir, rate=rate)
         )
+        substituted = engine.resolve()
+        if substituted:
+            note.message = (
+                f"Voice {engine.voice_name!r} was not downloaded, so "
+                f"{substituted} is being used instead."
+            )
         if engine.available():
             return engine
         reason = engine.load_error or "the Piper voice is not available"
@@ -213,7 +219,7 @@ def _select(kind: str, voices_dir, voice: str | None, rate: float, note: EngineN
         if sapi.available():
             sapi.configure(rate=rate)
             note.degraded_from = "piper"
-            note.message = f"{reason}, so Windows SAPI is speaking instead."
+            note.message = f"{reason}. {note.message} Windows SAPI is speaking.".strip()
             log.warning(note.message)
             return sapi
         note.degraded_from = "piper"

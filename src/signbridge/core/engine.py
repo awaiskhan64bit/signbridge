@@ -24,6 +24,7 @@ import numpy as np
 
 from ..config import Settings
 from ..ml.base import Recognizer
+from ..ml.collector import Collector
 from ..ml.features import encode_frame, encode_sequence
 from ..speech.service import SpeechService, build_engine
 from ..vision.camera import CaptureWorker
@@ -114,6 +115,7 @@ class SignEngine:
 
         self.tracker: HandTracker | None = None
         self.capture = self._build_capture()
+        self._collector = Collector(settings.data_dir / "collected")
         self._window: deque[np.ndarray] = deque(maxlen=max(8, settings.window_frames))
         self._stride = max(1, settings.window_frames // 12)
         self._since_predict = 0
@@ -236,6 +238,34 @@ class SignEngine:
         if self.speech.last_spoken:
             self.speech.say(self.speech.last_spoken)
 
+    # ------------------------------------------------------------- recording
+
+    @property
+    def collecting(self) -> bool:
+        return self._collector.is_recording
+
+    @property
+    def collector(self) -> Collector:
+        return self._collector
+
+    def start_recording(self, label: str) -> bool:
+        """Begin capturing a labelled clip of the user's own signing."""
+
+        return self._collector.start(label)
+
+    def stop_recording(self) -> str | None:
+        """Store the clip. Returns its path, or None if there was no real hand."""
+
+        path = self._collector.stop()
+        return str(path) if path else None
+
+    def cancel_recording(self) -> None:
+        self._collector.cancel()
+
+    def _feed_collector(self, features: np.ndarray) -> None:
+        if self._collector.is_recording:
+            self._collector.push(features)
+
     # ------------------------------------------------------------------ loop
 
     def _run(self) -> None:
@@ -269,7 +299,9 @@ class SignEngine:
             rgb = cv2.cvtColor(frame.image, cv2.COLOR_BGR2RGB)
             frame.hands = self.tracker.detect(rgb, frame.timestamp_ms)
 
-        self._window.append(encode_frame(frame.hands))
+        encoded = encode_frame(frame.hands)
+        self._window.append(encoded)
+        self._feed_collector(encoded)
         self.state.hands = len(frame.hands)
         self.state.tracking = bool(frame.hands)
         self.state.window_fill = len(self._window) / max(1, self._window.maxlen)

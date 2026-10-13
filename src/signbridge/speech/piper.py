@@ -134,6 +134,24 @@ class PiperEngine(TTSEngine):
             self._load()  # populates _load_error if it is still unset
         return None if self._voice is not None else self._load_error
 
+    def resolve(self) -> str | None:
+        """Substitute an installed voice when the chosen one is missing.
+
+        A stale voice name in the settings file, left over from a previous
+        install, would otherwise mean the app is silent with no obvious cause.
+        Any installed voice beats no voice.
+        """
+
+        if self.model_path.exists() and self.config_path.exists():
+            return None
+        available = self.voices()
+        if not available or self.voice_name in available:
+            return None
+        substituted = available[0]
+        self.close()
+        self.voice_name = substituted
+        return substituted
+
     @property
     def describe(self) -> str:
         if self.load_error:

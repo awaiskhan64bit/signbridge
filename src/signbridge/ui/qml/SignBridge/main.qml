@@ -546,6 +546,95 @@ ApplicationWindow {
                 }
             }
 
+            // Teach it. The most effective way to make the model work on your
+            // own signing is to train it on your own signing.
+            Card {
+                Layout.fillWidth: true
+                title: "Teach it your signs"
+                subtitle: "fine tunes the model on your webcam"
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 12
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        TextField {
+                            id: teachWord
+                            Layout.fillWidth: true
+                            placeholderText: "a word, e.g. hello"
+                            color: Theme.text
+                            placeholderTextColor: Theme.textFaint
+                            font.family: Theme.sans
+                            font.pixelSize: Theme.fontBody
+                            selectByMouse: true
+                            background: Rectangle {
+                                radius: Theme.radiusSmall
+                                color: Theme.bg
+                                border.width: 1
+                                border.color: teachWord.activeFocus ? Theme.accent : Theme.stroke
+                            }
+                            onAccepted: recordButton.clicked()
+                        }
+
+                        AccentButton {
+                            id: recordButton
+                            Layout.preferredWidth: 100
+                            text: app.collecting ? "Stop" : "Record"
+                            primary: !app.collecting
+                            danger: app.collecting
+                            enabled: app.collecting || teachWord.text.trim().length > 0
+                            onClicked: {
+                                if (app.collecting) {
+                                    app.stopRecording()
+                                } else {
+                                    app.startRecording(teachWord.text)
+                                    teachWord.text = ""
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: visible ? 6 : 0
+                        visible: app.collecting
+                        radius: 3
+                        color: Theme.surface3
+
+                        Rectangle {
+                            height: parent.height
+                            radius: parent.radius
+                            width: parent.width * app.collectProgress
+                            color: Theme.good
+                            Behavior on width { NumberAnimation { duration: 80 } }
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: app.collecting
+                        text: "Recording \"" + app.collectingLabel + "\". Hold the sign, then press Stop."
+                        color: Theme.good
+                        font.family: Theme.sans
+                        font.pixelSize: Theme.fontSmall
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: app.collectedClips + " clips recorded. " +
+                              "Then run scripts\\finetune.bat to teach the model."
+                        color: Theme.textFaint
+                        font.family: Theme.sans
+                        font.pixelSize: Theme.fontMicro
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+
             // Settings.
             Card {
                 Layout.fillWidth: true
@@ -645,11 +734,24 @@ ApplicationWindow {
                     SliderRow {
                         Layout.fillWidth: true
                         label: "Threshold"
-                        from: 0.30
+                        // Reaches well below the calibrated default on purpose.
+                        // The shipped cut is fitted on WLASL clips, but real
+                        // webcam input sits in a different domain and scores
+                        // lower, so the user has to be able to reach it.
+                        from: 0.02
                         to: 0.95
                         stepSize: 0.01
                         value: app.minConfidence
                         onMoved: (v) => app.setMinConfidence(v)
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Lower it to make the app speak more, higher to make it more careful. It stays silent below its own confidence."
+                        color: Theme.textFaint
+                        font.family: Theme.sans
+                        font.pixelSize: Theme.fontMicro
+                        wrapMode: Text.WordWrap
                     }
 
                     RowLayout {
