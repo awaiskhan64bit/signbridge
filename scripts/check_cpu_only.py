@@ -11,7 +11,6 @@ import numpy as np
 import onnxruntime as ort
 from PySide6.QtWidgets import QApplication
 
-from signbridge.config import Settings
 from signbridge.ml.dataset import encode_clip, resize_track
 from signbridge.ml.features import FEATURE_DIMS
 from signbridge.ml.neural import NeuralRecognizer

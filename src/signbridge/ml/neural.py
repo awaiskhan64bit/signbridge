@@ -114,6 +114,20 @@ class NeuralRecognizer(Recognizer):
         return self._threshold or self.min_confidence
 
     @property
+    def effective_threshold(self) -> float:
+        """The cut actually used, which can never sit below the calibrated one.
+
+        The UI exposes a confidence slider so the user can trade chattiness
+        against certainty. Letting it go below the calibrated value is not a
+        legitimate trade, it is simply ignoring the calibration: a 31% accurate
+        model thresholded at 0.20 speaks confident nonsense roughly four times in
+        five. The slider is therefore a strictness control, only ever raising the
+        bar above what training established.
+        """
+
+        return max(self.min_confidence, self._threshold)
+
+    @property
     def labels(self) -> list[str]:
         return self._labels
 
@@ -191,7 +205,7 @@ class NeuralRecognizer(Recognizer):
             (self._labels[i], float(scores[i])) for i in order[1:4] if scores[i] > 0.03
         ]
         return SignPrediction(
-            label=self._labels[best] if confidence >= self.min_confidence else "",
+            label=self._labels[best] if confidence >= self.effective_threshold else "",
             confidence=confidence,
             alternatives=alternatives,
         )

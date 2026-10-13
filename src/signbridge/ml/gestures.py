@@ -1,22 +1,23 @@
 """Rule based gesture recognizer.
 
-Not machine learning, and not pretending to be. It exists for two reasons:
-
-  * it gives the app a working vocabulary out of the box, before any model has
-    been trained, so the pipeline, HUD and speech can be verified end to end
-  * it is a useful control condition when evaluating the trained network
+Not machine learning, and not pretending to be. It exists so the app has a
+working vocabulary before any model has been trained, which lets the pipeline,
+HUD and speech be verified end to end.
 
 It reads the same feature windows the neural recognizer does and decides from
 average finger curl plus how far the thumb reaches.
 
-Thresholds were calibrated by measuring the encoder against the hand rig in
-`vision/simulated.py`, which reports curls in the range 0.0 (fully extended) to
-about 0.47 (closed fist) and thumb reach from 0.7 (tucked) to 1.1 (extended).
+These six are 100% accurate by construction rather than by skill, and that
+distinction matters when comparing against the trained model. Each rule reads
+off hand shape, the hand rig in `vision/simulated.py` produces exactly those
+shapes, and nothing else can ever be confused for them. The network has to
+separate hundreds of words that genuinely look alike, which is a different and
+much harder job. A high score here means the rules match the rig, not that
+sign recognition is solved.
 
-Note that `thumbs_down` is deliberately absent. The feature encoder is rotation
-invariant on purpose, which makes a thumbs up and a thumbs down produce identical
-features. Telling them apart needs screen-relative orientation, which this layer
-deliberately throws away.
+Thresholds were calibrated by measuring the encoder against that rig, which
+reports curls in the range 0.0 (fully extended) to about 0.47 (closed fist) and
+thumb reach from 0.7 (tucked) to 1.1 (extended).
 """
 
 from __future__ import annotations

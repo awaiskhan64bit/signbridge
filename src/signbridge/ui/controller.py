@@ -138,6 +138,28 @@ class Controller(QObject):
     def recognizerKind(self) -> str:
         return self._recognizer_kind
 
+    @Property(str, notify=stateChanged)
+    def activeRecognizerKind(self) -> str:
+        """The engine actually loaded, with "auto" already resolved.
+
+        `recognizerKind` is the user's preference, which defaults to "auto".
+        Comparing that against "words" in the UI made the chip report gestures
+        even while the neural model was running, so the readout has to come from
+        the live recognizer instead of from the preference.
+        """
+
+        return self._resolve_kind(self._recognizer_kind)
+
+    @Property(str, notify=stateChanged)
+    def activeVocabularyLabel(self) -> str:
+        """Word count for the chip, read off the loaded model rather than guessed.
+
+        The number used to be hardcoded, which silently went stale the moment a
+        different vocabulary was trained.
+        """
+
+        return f"{len(self._recognizer.labels):,} words"
+
     @Property(bool, notify=stateChanged)
     def neuralAvailable(self) -> bool:
         """Whether a trained model is on disk. Drives whether the words option is
@@ -344,6 +366,19 @@ class Controller(QObject):
     def minConfidence(self) -> float:
         return self.settings.min_sign_confidence
 
+    @Property(float, notify=stateChanged)
+    def confidenceFloor(self) -> float:
+        """Lowest confidence the loaded model will speak at.
+
+        Reported to the UI so the slider cannot be parked below the model's own
+        calibrated threshold, which is what made the app speak confident nonsense.
+        """
+
+        floor = getattr(self._recognizer, "default_threshold", None)
+        if not floor:
+            return 0.02
+        return float(min(floor, 0.95))
+
     # ----------------------------------------------------------------- slots
 
     @Slot()
@@ -419,8 +454,12 @@ class Controller(QObject):
 
     @Slot(float)
     def setMinConfidence(self, value: float) -> None:
-        # The range has to reach well below the model's own calibrated cut, since
-        # real webcam input sits in a different domain and scores lower.
+        # Strictness only. The model measured a confidence cut that maximises
+        # precision on the clips it accepts, and a slider below that is not a
+        # looser setting, it is ignoring the calibration. Clamp to the floor and
+        # let the user raise it as high as they like.
+        floor = self.confidenceFloor
+        value = max(floor, min(0.95, value))
         self._set_float("min_sign_confidence", value, 0.02, 0.95)
         with self.engine._lock:
             self.engine.recognizer = self._build_recognizer(self._recognizer_kind)

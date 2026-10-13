@@ -117,12 +117,14 @@ ApplicationWindow {
 
             StatChip {
                 label: "Engine"
-                value: app.recognizerKind === "words" ? "WLASL" : "Gestures"
-                accentColor: app.recognizerKind === "words" ? Theme.good : Theme.violet
+                value: app.activeRecognizerKind === "words" ? "WLASL" : "Gestures"
+                accentColor: app.activeRecognizerKind === "words" ? Theme.good : Theme.violet
             }
             StatChip {
                 label: "Vocab"
-                value: app.recognizerKind === "words" ? "1,992 words" : "6 gestures"
+                value: app.activeRecognizerKind === "words"
+                       ? app.activeVocabularyLabel
+                       : "6 gestures"
                 accentColor: Theme.textFaint
             }
             StatChip {
@@ -718,7 +720,7 @@ ApplicationWindow {
 
                     Text {
                         Layout.fillWidth: true
-                        visible: app.recognizerKind === "words"
+                        visible: app.activeRecognizerKind === "words"
                         text: app.recognizerLabel
                         color: Theme.textFaint
                         font.family: Theme.mono
@@ -728,7 +730,7 @@ ApplicationWindow {
 
                     Text {
                         Layout.fillWidth: true
-                        text: app.recognizerKind === "words"
+                        text: app.activeRecognizerKind === "words"
                               ? "Trained on WLASL. Silent unless confident, which on a webcam it usually will not be."
                               : "Six static gestures from hand shape. Works in demo mode and needs no model."
                         color: Theme.textFaint
@@ -787,14 +789,14 @@ ApplicationWindow {
                     SliderRow {
                         Layout.fillWidth: true
                         label: "Threshold"
-                        // Reaches well below the calibrated default on purpose.
-                        // The shipped cut is fitted on WLASL clips, but real
-                        // webcam input sits in a different domain and scores
-                        // lower, so the user has to be able to reach it.
-                        from: 0.02
+                        // Strictness only. `from` is the model's own calibrated
+                        // cut, so the slider can tighten but never ignore it.
+                        // Letting it go lower was how a 31% accurate model ended
+                        // up speaking confidently at 20% probability.
+                        from: app.confidenceFloor
                         to: 0.95
                         stepSize: 0.01
-                        value: app.minConfidence
+                        value: Math.max(app.minConfidence, app.confidenceFloor)
                         onMoved: (v) => app.setMinConfidence(v)
                     }
 

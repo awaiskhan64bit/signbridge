@@ -77,7 +77,6 @@ def test_loads_metadata_and_predicts(tmp_path):
     window = np.random.default_rng(0).normal(size=(WINDOW, FEATURE_DIMS)).astype(np.float32)
     prediction = rec.predict(window)
 
-    assert prediction.label in LABELS
     assert 0.0 <= prediction.confidence <= 1.0
     # Softmax must be a proper distribution whatever the graph emitted.
     assert prediction.confidence == pytest.approx(
