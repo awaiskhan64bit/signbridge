@@ -158,12 +158,20 @@ def augment(track: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     Works on the encoded features rather than raw landmarks because that is
     where the invariances already live, so augmentation only has to cover what
     normalisation cannot: timing, framing and noise.
+
+    The hand block occupies the first `FEATURE_DIMS` columns and every operation
+    below is confined to it. Body-aware tracks append pose columns after that,
+    and the mirror step is a stride-of-three flip across the row: applied to the
+    whole row it inverts pose coordinates as well, which silently replaces body
+    geometry with nonsense while the loss curve still falls.
     """
 
     out = track.copy()
     t = len(out)
     if t < 4:
         return out
+
+    hand_width = min(FEATURE_DIMS, out.shape[1])
 
     # Temporal crop: signs start and stop at different moments.
     keep = int(t * rng.uniform(0.55, 1.0))
@@ -190,8 +198,9 @@ def augment(track: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
     # Mirror: flip x and flip the palm normal, which is what keeps the mirrored
     # hand a physically possible hand rather than a left hand seen from behind.
+    # Confined to the hand block so pose geometry survives.
     if rng.random() < 0.5:
-        out[:, 0::3] *= -1.0
+        out[:, :hand_width:3] *= -1.0
         out[:, _PALM_NORMAL : _PALM_NORMAL + 3] *= -1.0
         out[:, _FRAME_X] = 1.0 - out[:, _FRAME_X]
         out[:, _FRAME_DIR : _FRAME_DIR + 4] *= -1.0
@@ -218,13 +227,23 @@ def augment(track: np.ndarray, rng: np.random.Generator) -> np.ndarray:
         out[:, _FRAME_Y] * rng.uniform(0.85, 1.2) + rng.normal(0.0, 0.03), -0.5, 1.5
     )
 
-    # Frame dropout, standing in for tracker flicker.
-    if rng.random() < 0.35:
-        out[rng.random(len(out)) < 0.08] = 0.0
+    # Amplitude jitter on the derived features. Scoped to the hand block for the
+    # same reason as the mirror; the pose columns get their own, gentler jitter
+    # below rather than the same additive noise.
+    derived = out[:, _COORDS:hand_width]
+    out[:, _COORDS:hand_width] = derived + rng.normal(0.0, 0.03, size=derived.shape)
 
-    # Amplitude jitter on the derived features.
-    derived = out[:, _COORDS:]
-    out[:, _COORDS:] = derived + rng.normal(0.0, 0.03, size=derived.shape)
+    # Body columns, when present: small scale and noise, plus dropout that clears
+    # the pose together with the hand so a dropped pose is never paired with a
+    # live hand, which would read as the hand being somewhere impossible.
+    if out.shape[1] > hand_width:
+        body = out[:, hand_width:]
+        body = body * rng.uniform(0.9, 1.1)
+        body = body + rng.normal(0.0, 0.02, size=body.shape)
+        out[:, hand_width:] = body
+    if rng.random() < 0.35:
+        drop = rng.random(len(out)) < 0.08
+        out[drop] = 0.0
 
     return out.astype(np.float32)
 

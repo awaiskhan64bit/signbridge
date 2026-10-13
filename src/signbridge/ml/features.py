@@ -265,15 +265,20 @@ def encode_frame(hands: list[Hand]) -> np.ndarray:
 
 
 def encode_sequence(features: list[np.ndarray], length: int) -> np.ndarray:
-    """Right-align a variable length sequence into a (length, FEATURE_DIMS) window.
+    """Right-align a variable length sequence into a fixed (length, width) window.
 
     Right alignment matters: a sign ends when the hand settles, so the most recent
     frames are the meaningful ones and the oldest frames fall off the left.
+
+    The width is taken from the data rather than from `FEATURE_DIMS`. The body
+    aware tracks append 34 pose columns to the 86 hand columns, and padding a
+    120 wide track into an 86 wide window raises a broadcast error that looks
+    like corrupt data rather than a wrong constant.
     """
 
-    out = np.zeros((length, FEATURE_DIMS), dtype=np.float32)
     if not features:
-        return out
-    tail = features[-length:]
-    out[length - len(tail) :] = np.asarray(tail, dtype=np.float32)
+        return np.zeros((length, FEATURE_DIMS), dtype=np.float32)
+    tail = np.asarray(features[-length:], dtype=np.float32)
+    out = np.zeros((length, tail.shape[1]), dtype=np.float32)
+    out[length - len(tail) :] = tail
     return out

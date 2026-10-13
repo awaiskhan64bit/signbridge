@@ -23,6 +23,16 @@ import numpy as np
 #: "correct on the two easiest clips" cannot beat "correct on a third of them".
 COVERAGE_TARGET = 0.35
 
+#: Precision a cut must reach before it is allowed to speak at all.
+#:
+#: Without a floor the sweep maximises precision times coverage, and coverage is
+#: always positive, so the best it can do is pick the least-bad cut rather than
+#: stay silent. On a 500 word model scoring 2.7% top-1 that produced a cut of
+#: 0.245 at 4% precision: the app announced a guess four times in five, which
+#: for speech is far worse than saying nothing. A cut that cannot beat this is
+#: not a cut, so the answer becomes 1.0 and the app stays quiet.
+MIN_PRECISION = 0.55
+
 
 @dataclass(frozen=True, slots=True)
 class Calibration:
@@ -44,7 +54,7 @@ def _sweep(probs: np.ndarray, labels: np.ndarray) -> Calibration:
     correct = (predicted == labels).astype(np.float64)
     order = np.argsort(-confidence)
 
-    best = Calibration(0.5, 0.0, 0.0, -1.0)
+    best = Calibration(1.0, 0.0, 0.0, -1.0)
     running = 0.0
     total = len(order)
 
@@ -52,6 +62,10 @@ def _sweep(probs: np.ndarray, labels: np.ndarray) -> Calibration:
         running += correct[order[k - 1]]
         coverage = k / total
         precision = running / k
+        if precision < MIN_PRECISION:
+            # Confidence only grows as coverage grows, so once a cut drops below
+            # the floor every looser cut is worse too. The sweep can stop here.
+            break
         score = precision * min(1.0, coverage / COVERAGE_TARGET)
         if score > best.score:
             best = Calibration(
