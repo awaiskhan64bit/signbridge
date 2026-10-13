@@ -27,7 +27,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-KEY = json.load(open(os.path.expanduser("~/.kaggle/kaggle.json")))["key"]
+with open(os.path.expanduser("~/.kaggle/kaggle.json"), encoding="utf-8") as fh:
+    KEY = json.load(fh)["key"]
 URL = "https://www.kaggle.com/api/v1/datasets/download/abd0kamel/mutemotion-output"
 
 ROOT = Path("data/mutemotion")
@@ -37,13 +38,17 @@ WANTED = {"WLASL_parsed_data.json", "landmarks_V3.npz"}
 
 
 def total_size() -> int:
-    """Archive size, or 0 when it cannot be established.
+    """Archive size in bytes, or 0 when it cannot be established.
 
-    Kaggle answers GET on the download endpoint but 404s a HEAD against it, so
-    the size is read from the dataset listing instead of probing the stream. The
-    listing reports the same number the archive reports, and a zero here only
-    costs progress percentages, not correctness: completion is checked by
-    comparing against the zip's own size when the archive is opened.
+    `totalBytes` from the dataset listing describes the dataset, not the zip, and
+    it is about 81MB larger. Comparing a completed transfer against it means
+    completion is never reached, so the loop retries and every retry asks for a
+    range past the end of the file, which Kaggle answers with 416. The first
+    pass downloaded all 14.27GB correctly and then failed for twenty attempts
+    over a mismatch that could not have affected the data.
+
+    Completion is therefore judged from the archive itself: a zip that opens and
+    lists its members is finished, whatever the listing claims.
     """
 
     req = urllib.request.Request(
@@ -54,8 +59,24 @@ def total_size() -> int:
         return int(json.loads(r.read())["totalBytes"])
 
 
-def fetch_archive(attempts: int = 20) -> None:
+def already_complete() -> bool:
+    """True when the archive on disk is a readable zip with all members present."""
+
+    if not ARCHIVE.exists() or ARCHIVE.stat().st_size < 1_000_000_000:
+        return False
+    try:
+        with zipfile.ZipFile(ARCHIVE) as zf:
+            members = set(zf.namelist())
+    except zipfile.BadZipFile:
+        return False
+    return members >= WANTED
+
+
+def fetch_archive(attempts: int = 6) -> None:
     ROOT.mkdir(parents=True, exist_ok=True)
+    if already_complete():
+        print("archive already present and complete, skipping download", flush=True)
+        return
     total = total_size()
     have = ARCHIVE.stat().st_size if ARCHIVE.exists() else 0
     print(f"archive: {total / 1e9:.2f} GB, {have / 1e9:.2f} GB already on disk", flush=True)
