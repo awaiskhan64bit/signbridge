@@ -30,6 +30,7 @@ from ..speech.service import SpeechService, build_engine
 from ..vision.camera import CaptureWorker
 from ..vision.hands import HandTracker
 from ..vision.overlay import draw_hands
+from ..vision.pose import PoseTracker
 from .decoder import DecodedEvent, Event, SignDecoder, window_has_hand
 from .types import Frame, SignPrediction, Source
 
@@ -114,6 +115,9 @@ class SignEngine:
             self.state.error = self.speech.note.message
 
         self.tracker: HandTracker | None = None
+        #: Body landmarks. Optional because hand-only recognition does not need
+        #: it, and a missing pose model must not stop the app from starting.
+        self.pose: PoseTracker | None = None
         self.capture = self._build_capture()
         self._collector = Collector(settings.data_dir / "collected")
         self._window: deque[np.ndarray] = deque(maxlen=max(8, settings.window_frames))
@@ -159,18 +163,36 @@ class SignEngine:
         if self.tracker is not None:
             self.tracker.close()
             self.tracker = None
+        if self.pose is not None:
+            self.pose.close()
+            self.pose = None
 
     def _load_tracker(self) -> None:
         self.tracker = None
+        self.pose = None
         if self.state.source is Source.SIMULATED:
             return  # synthetic frames arrive with their own hands attached
-        model = Path(self.settings.models_dir) / "hand_landmarker.task"
-        tracker = HandTracker(model, min_confidence=self.settings.hand_confidence)
+
+        models = Path(self.settings.models_dir)
+        hand_model = models / "hand_landmarker.task"
+        tracker = HandTracker(hand_model, min_confidence=self.settings.hand_confidence)
         tracker.load()
         if tracker.available:
             self.tracker = tracker
         else:
+            # A hand failure is fatal: nothing downstream works without it.
             self.state.error = tracker.error
+
+        pose_model = models / "pose_landmarker_lite.task"
+        pose = PoseTracker(pose_model, min_confidence=self.settings.hand_confidence)
+        pose.load()
+        if pose.available:
+            self.pose = pose
+        else:
+            # Body landmarks improve recognition but are not required for it, so
+            # this is a warning rather than an error that blocks startup.
+            log.warning("Body tracking unavailable: %s", pose.error)
+            self.state.error = self.state.error or f"Body tracking off: {pose.error}"
 
     # --------------------------------------------------------------- commands
 
@@ -293,11 +315,19 @@ class SignEngine:
         if frame.image is not None and self.settings.mirror:
             frame.image = np.ascontiguousarray(frame.image[:, ::-1])
 
-        if not frame.hands and self.tracker is not None and frame.image is not None:
+        needs_vision = (
+            self.tracker is not None
+            and frame.image is not None
+            and (not frame.hands or frame.pose is None)
+        )
+        if needs_vision:
             import cv2
 
             rgb = cv2.cvtColor(frame.image, cv2.COLOR_BGR2RGB)
-            frame.hands = self.tracker.detect(rgb, frame.timestamp_ms)
+            if not frame.hands:
+                frame.hands = self.tracker.detect(rgb, frame.timestamp_ms)
+            if frame.pose is None and self.pose is not None:
+                frame.pose = self.pose.detect(rgb, frame.timestamp_ms)
 
         encoded = encode_frame(frame.hands)
         self._window.append(encoded)

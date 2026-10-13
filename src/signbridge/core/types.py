@@ -57,12 +57,24 @@ class Frame:
 
     image: np.ndarray | None = None
     hands: list[Hand] = field(default_factory=list)
+    #: (33, 3) body landmarks, or None when no body was visible. Kept separate
+    #: from `hands` because the two are detected by separate MediaPipe models
+    #: and either can succeed while the other fails.
+    pose: np.ndarray | None = None
     index: int = 0
     timestamp_ms: float = 0.0
 
     @property
     def primary(self) -> Hand | None:
         return self.hands[0] if self.hands else None
+
+    def by_handedness(self, wanted: Handedness) -> np.ndarray | None:
+        """The landmarks of the hand MediaPipe labelled `wanted`, if present."""
+
+        for hand in self.hands:
+            if hand.handedness is wanted:
+                return hand.landmarks
+        return None
 
 
 @dataclass(slots=True)

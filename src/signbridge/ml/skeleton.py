@@ -211,14 +211,51 @@ def _present(points: np.ndarray) -> np.ndarray:
 def _used(clip: np.ndarray) -> np.ndarray:
     """Trim a 553-joint corpus frame to the 75 this model uses.
 
-    Left hand, right hand, then pose, which is the documented layout. The face
-    block is dropped here rather than downstream so nothing later has to
-    remember to skip it.
+    Live capture assembles its 75 joints directly, so a track that is already the
+    right width is passed through rather than being re-sliced. The face block is
+    dropped here rather than downstream so nothing later has to remember to skip
+    it.
     """
 
+    if clip.shape[1] == JOINTS:
+        return clip
     return np.concatenate(
         [clip[:, LEFT_HAND, :], clip[:, RIGHT_HAND, :], clip[:, POSE, :]], axis=1
     )
+
+
+def assemble(
+    left_hand: np.ndarray | None, right_hand: np.ndarray | None, pose: np.ndarray | None
+) -> np.ndarray:
+    """One body frame as (JOINTS, 3), with zeros where nothing was detected.
+
+    Slots are by handedness, not by detection order, because that is how the
+    corpus is laid out: the left hand always occupies [0, 21) and the right hand
+    always occupies [21, 42). Putting whichever hand happened to be detected
+    first into slot zero would swap the two roughly half the time, and the model
+    would read a right-handed signer as a left-handed one on half of all frames.
+    That failure is invisible in aggregate accuracy and obvious to a user.
+
+    Handedness is MediaPipe's anatomical label for the signer, which is the same
+    convention the corpus uses. Detecting from a horizontally flipped image flips
+    the coordinates but not the anatomical label, which is why hands and pose
+    must be extracted from the same image in the same pass.
+    """
+
+    out = np.zeros((JOINTS, 3), dtype=np.float32)
+    if left_hand is not None:
+        arr = np.asarray(left_hand, dtype=np.float32)
+        if arr.shape == (21, 3):
+            out[0:21] = arr
+    if right_hand is not None:
+        arr = np.asarray(right_hand, dtype=np.float32)
+        if arr.shape == (21, 3):
+            out[21:42] = arr
+    if pose is not None:
+        arr = np.asarray(pose, dtype=np.float32)
+        if arr.shape == (33, 3):
+            out[POSE_START:] = arr
+    return out
 
 
 def normalise_body(clip: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
