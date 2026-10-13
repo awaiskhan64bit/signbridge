@@ -61,16 +61,22 @@ The `[tts]` extra adds Piper, which is what makes the voice sound like a person.
 | Speak the current phrase | `Ctrl+Enter` |
 | Repeat the last phrase | `Ctrl+R` |
 | Change input source | Camera / Clip / Demo, top right of the viewport |
-| Tune sensitivity | The threshold slider, which is the model's own calibrated cut |
+| Get back to the hand rig | **Back to demo**, or the Demo segment |
+| Record your own signs | **Teach it your signs** in the right rail |
+| Tune sensitivity | The threshold slider |
 
 Settings persist to `%LOCALAPPDATA%\SignBridge\settings.json`.
 
 ### When it is quiet
 
-The classifier will refuse to speak unless it is confident. That is deliberate.
-WLASL is a hard dataset and this model is honest about its limits, so it stays
-silent rather than inventing words. The threshold slider trades silence for
-guessing; see the accuracy section for what each setting is worth.
+The classifier refuses to speak unless it is confident. On WLASL footage it
+accepts about 37% of clips at 22% precision, and on footage from a different
+domain it accepts almost nothing. That is deliberate: an accessibility tool that
+confidently says the wrong thing is worse than one that stays silent.
+
+Lower the threshold to trade silence for more guesses. See
+[Making it work on your webcam](#making-it-work-on-your-webcam) for the better
+fix.
 
 ## The model
 
@@ -86,6 +92,36 @@ the honest numbers. The
 [precision when it chooses to speak](docs/results.md) table is the one that
 describes what the app actually does: it accepts about a third of what it sees
 and is right 22% of the time. It degrades into silence, not into nonsense.
+
+## Making it work on your webcam
+
+This is the part that matters, and it is not a modelling problem.
+
+WLASL is tightly cropped, isolated signs, recorded on other people's phones. A
+webcam is none of those things. The shipped model is accurate on WLASL clips and
+quietly silent on real video, which is the honest result of that mismatch rather
+than a bug. Measured on an ASL tutorial video, its confidence peaks at 0.12
+against a threshold of 0.29.
+
+The fix is to train on your own signing, which the app can record for you:
+
+1. Open **Teach it your signs**, type a word, press **Record**
+2. Perform the sign, press **Stop**
+3. Repeat a few times per word, across as many words as you care about
+4. Run `scripts\finetune.bat`
+
+A few dozen clips takes a couple of minutes to record and a couple of minutes to
+train. It works far better than any amount of extra augmentation, because it is
+the only data that matches how you actually sign.
+
+Add `--with-wlasl` if you want to keep the full two thousand word vocabulary
+rather than leaning towards the words you recorded.
+
+Two knobs help in the meantime. The **threshold** slider goes well below the
+model's own calibrated cut, which is what you want for out-of-domain input. And
+the **Vocabulary** selector switches between the WLASL model and the six
+built-in gestures, which is what makes demo mode work at all, since
+`open_palm` and `victory` are not WLASL words.
 
 ```bash
 python scripts/fetch_wlasl.py       # ~430 MB of landmarks, once
