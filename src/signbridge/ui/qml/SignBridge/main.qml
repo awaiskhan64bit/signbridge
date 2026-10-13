@@ -124,7 +124,7 @@ ApplicationWindow {
                 label: "Vocab"
                 value: app.activeRecognizerKind === "words"
                        ? app.activeVocabularyLabel
-                       : "6 gestures"
+                       : app.activeGestureCountLabel
                 accentColor: Theme.textFaint
             }
             StatChip {
@@ -732,7 +732,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         text: app.activeRecognizerKind === "words"
                               ? "Trained on WLASL. Silent unless confident, which on a webcam it usually will not be."
-                              : "Six static gestures from hand shape. Works in demo mode and needs no model."
+                              : "Template gestures. Works in demo mode; needs a few recorded clips of your own signing before it works on a camera."
                         color: Theme.textFaint
                         font.family: Theme.sans
                         font.pixelSize: Theme.fontMicro

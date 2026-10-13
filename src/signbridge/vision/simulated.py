@@ -16,6 +16,7 @@ import math
 import numpy as np
 
 from ..core.types import LANDMARK_COUNT, Hand, Handedness
+from . import gesturebook
 from .camera import VideoSource
 
 # Draw colours in BGR, matching the live overlay so demo mode looks identical.
@@ -177,27 +178,10 @@ def build_landmarks(pose: Pose) -> np.ndarray:
 
 # --------------------------------------------------------------------- poses
 
-# Key poses, named after the gesture they produce. These are the same shapes
-# ml/gestures.py was calibrated against, so demo mode drives the real recognizer
-# with gestures it can actually recognise rather than decorative motion.
-GESTURES: dict[str, Pose] = {
-    "open_palm": Pose(curls=(0.05, 0.0, 0.0, 0.0, 0.0), thumb_extend=0.6, spread=0.5),
-    "closed_fist": Pose(
-        curls=(0.90, 0.85, 0.85, 0.85, 0.80), thumb_opposition=0.8, thumb_extend=0.1
-    ),
-    "pointing_up": Pose(
-        curls=(0.90, 0.0, 0.85, 0.85, 0.85), thumb_opposition=0.9, thumb_extend=0.1
-    ),
-    "thumbs_up": Pose(
-        curls=(0.95, 0.85, 0.85, 0.85, 0.85), thumb_opposition=0.0, thumb_extend=1.0
-    ),
-    "victory": Pose(
-        curls=(0.90, 0.0, 0.0, 0.85, 0.85), thumb_opposition=0.9, thumb_extend=0.1
-    ),
-    "i_love_you": Pose(
-        curls=(0.90, 0.0, 0.85, 0.85, 0.0), thumb_opposition=0.9, thumb_extend=0.1
-    ),
-}
+# The gesture book lives in vision/gesturebook.py so the rig and the recogniser
+# cannot drift apart: both read the same table, so a pose cannot be drawn unless
+# the recogniser also has a template for it.
+GESTURES: dict[str, Pose] = gesturebook.build_gestures()
 
 #: A loose, non-signing hand shape, used between gestures so the decoder sees a
 #: real transition instead of one pose snapping straight into the next.
@@ -216,16 +200,10 @@ def _phrase(label: str) -> list[Pose]:
     return [approach, target, target, target]
 
 
-#: (gesture label, poses) pairs, cycled endlessly by the simulated signer.
+#: Every gesture in the book, cycled endlessly. The demo used to cycle six; the
+#: full book is what exercises a hundred-word recogniser end to end.
 PHRASEBOOK: list[tuple[str, list[Pose]]] = [
-    ("open_palm", _phrase("open_palm")),
-    ("thumbs_up", _phrase("thumbs_up")),
-    ("i_love_you", _phrase("i_love_you")),
-    ("pointing_up", _phrase("pointing_up")),
-    ("victory", _phrase("victory")),
-    ("closed_fist", _phrase("closed_fist")),
-    ("open_palm", _phrase("open_palm")),
-    ("thumbs_up", _phrase("thumbs_up")),
+    (label, _phrase(label)) for label in gesturebook.labels() if label in GESTURES
 ]
 
 

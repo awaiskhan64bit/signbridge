@@ -160,6 +160,12 @@ class Controller(QObject):
 
         return f"{len(self._recognizer.labels):,} words"
 
+    @Property(str, notify=stateChanged)
+    def activeGestureCountLabel(self) -> str:
+        """Gesture count for the chip, read off the loaded recogniser."""
+
+        return f"{len(self._recognizer.labels):,} gestures"
+
     @Property(bool, notify=stateChanged)
     def neuralAvailable(self) -> bool:
         """Whether a trained model is on disk. Drives whether the words option is
