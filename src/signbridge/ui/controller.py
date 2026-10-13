@@ -9,6 +9,7 @@ because everything on this object lives on the GUI thread.
 from __future__ import annotations
 
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -67,6 +68,7 @@ class Controller(QObject):
         self._history: list[dict] = []
         self._last_clip: str | None = None
         self._frame_id = 0
+        self._last_frame_at: float | None = None
         self._state = EngineState()
 
         # A user can pin an engine, otherwise the source picks: demo mode uses
@@ -166,11 +168,25 @@ class Controller(QObject):
             pixmap = QPixmap.fromImage(_to_qimage(rgb))
 
         self._state = state
+        self._last_frame_at = time.monotonic()
         if pixmap is not None:
             self.provider.publish(pixmap)
             self._frame_id += 1
             self.frameReady.emit()
         self.stateChanged.emit()
+
+    @Property(bool, notify=stateChanged)
+    def stalled(self) -> bool:
+        """True when the pipeline has stopped delivering frames.
+
+        Without this a capture that has wedged, or the process being starved of
+        CPU, looks identical to a camera pointed at a dark wall: a frozen last
+        frame with no explanation at all.
+        """
+
+        if self._last_frame_at is None:
+            return False
+        return (time.monotonic() - self._last_frame_at) > 2.0
 
     def _on_event(self, event: DecodedEvent) -> None:
         if event.kind is Event.SIGN and event.label:

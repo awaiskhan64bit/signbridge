@@ -293,6 +293,59 @@ ApplicationWindow {
                     }
                 }
 
+                // Stalled. Showing the last frame forever is indistinguishable
+                // from a camera pointed at a dark wall, so say what is happening
+                // and offer a way out.
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    visible: app.stalled
+                    radius: Theme.radius
+                    color: Qt.rgba(6, 7, 13, 0.9)
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 12
+                        width: 400
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "Video has stopped"
+                            color: Theme.text
+                            font.family: Theme.sans
+                            font.pixelSize: Theme.fontTitle
+                            font.weight: Font.DemiBold
+                        }
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: app.errorText !== ""
+                                  ? app.errorText
+                                  : "No frames are arriving. The clip may have ended, or something else is loading the machine."
+                            color: Theme.textDim
+                            font.family: Theme.sans
+                            font.pixelSize: Theme.fontBody
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Row {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            spacing: 8
+
+                            AccentButton {
+                                text: "Back to demo"
+                                primary: true
+                                onClicked: app.clearClip()
+                            }
+                            GhostButton {
+                                text: "Open another..."
+                                onClicked: clipDialog.open()
+                            }
+                        }
+                    }
+                }
+
                 // The clip's name, so it is obvious what is playing.
                 Rectangle {
                     anchors.left: parent.left
