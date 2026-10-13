@@ -107,6 +107,10 @@ class SignEngine:
             )
         )
         self.speech.player.set_volume(settings.tts_volume)
+        if self.speech.note.degraded:
+            # Surface it immediately rather than leaving the user wondering why
+            # the app is silent.
+            self.state.error = self.speech.note.message
 
         self.tracker: HandTracker | None = None
         self.capture = self._build_capture()
@@ -204,7 +208,8 @@ class SignEngine:
         self.speech.player.set_volume(settings.tts_volume)
         self.decoder.signs_per_phrase = settings.signs_per_phrase
         self.decoder.phrase_pause_ms = settings.phrase_pause_ms
-        if settings.tts_engine != self.speech.engine.name.lower().split()[0]:
+        current = self.speech.engine.name.lower().split()[0]
+        if settings.tts_engine != current:
             self.speech.set_engine(
                 build_engine(
                     settings.tts_engine,
@@ -213,6 +218,7 @@ class SignEngine:
                     settings.tts_rate,
                 )
             )
+            self.state.error = self.speech.note.message or None
         else:
             configure = getattr(self.speech.engine, "set_rate", None)
             if callable(configure):

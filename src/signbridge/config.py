@@ -55,7 +55,7 @@ class Settings:
 
     # Speech
     tts_engine: str = "piper"  # "piper" | "sapi" | "off"
-    tts_voice: str = "en_US-hfc_female-medium"
+    tts_voice: str = "en_US-lessac-medium"
     tts_rate: float = 1.0
     tts_volume: float = 1.0
     speak_automatically: bool = True

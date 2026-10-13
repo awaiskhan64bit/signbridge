@@ -7,6 +7,8 @@ voice, never stalls the camera pipeline.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import queue
 import threading
 import time
@@ -17,6 +19,20 @@ import numpy as np
 from .base import NullEngine, TTSEngine
 from .piper import PiperEngine
 from .sapi import SAPIEngine
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class EngineNote:
+    """Why the running engine is not the one that was asked for."""
+
+    degraded_from: str = ""
+    message: str = ""
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self.degraded_from)
 
 
 @dataclass(slots=True)
@@ -76,8 +92,9 @@ class AudioPlayer:
 class SpeechService:
     """Queues phrases, synthesises them in order, plays them without blocking."""
 
-    def __init__(self, engine: TTSEngine | None = None) -> None:
+    def __init__(self, engine: TTSEngine | None = None, note: EngineNote | None = None) -> None:
         self.engine: TTSEngine = engine or NullEngine()
+        self.note = note or getattr(self.engine, "note", None) or EngineNote()
         self.player = AudioPlayer()
         self._queue: queue.Queue[SpeechJob | None] = queue.Queue()
         self._thread: threading.Thread | None = None
@@ -118,10 +135,12 @@ class SpeechService:
             except queue.Empty:
                 break
 
-    def set_engine(self, engine: TTSEngine) -> None:
+    def set_engine(self, engine: TTSEngine, note: EngineNote | None = None) -> None:
         self.clear()
         self.engine.close()
         self.engine = engine
+        if note is not None:
+            self.note = note
 
     @property
     def busy(self) -> bool:
@@ -160,12 +179,56 @@ def build_engine(
     voices_dir=None,
     voice: str | None = None,
     rate: float = 1.0,
+    note: EngineNote | None = None,
 ) -> TTSEngine:
-    """Factory used by the controller so engine switching stays declarative."""
+    """Build an engine, degrading rather than failing.
+
+    Asking for Piper when its voice has not been downloaded used to produce a
+    silent engine: every synthesis returned None and the app simply said nothing,
+    with no clue why. An unavailable engine now falls back to the one built into
+    Windows, and the reason is recorded on `note` so the UI can say so out loud.
+    """
 
     kind = (kind or "off").lower()
+    note = note if note is not None else EngineNote()
+    engine = _select(kind, voices_dir, voice, rate, note)
+    # The note rides along with the engine so a caller cannot forget to pass it,
+    # which is how the reason a fallback happened used to get dropped.
+    with contextlib.suppress(AttributeError):
+        engine.note = note
+    return engine
+
+
+def _select(kind: str, voices_dir, voice: str | None, rate: float, note: EngineNote) -> TTSEngine:
     if kind == "piper":
-        return PiperEngine(voices_dir, voice, rate) if voice else PiperEngine(voices_dir, rate=rate)
+        engine = (
+            PiperEngine(voices_dir, voice, rate)
+            if voice
+            else PiperEngine(voices_dir, rate=rate)
+        )
+        if engine.available():
+            return engine
+        reason = engine.load_error or "the Piper voice is not available"
+        sapi = SAPIEngine()
+        if sapi.available():
+            sapi.configure(rate=rate)
+            note.degraded_from = "piper"
+            note.message = f"{reason}, so Windows SAPI is speaking instead."
+            log.warning(note.message)
+            return sapi
+        note.degraded_from = "piper"
+        note.message = f"{reason}, and Windows SAPI is unavailable. Speech is off."
+        log.error(note.message)
+        return NullEngine()
+
     if kind == "sapi":
-        return SAPIEngine()
+        sapi = SAPIEngine()
+        if sapi.available():
+            sapi.configure(rate=rate)
+            return sapi
+        note.degraded_from = "sapi"
+        note.message = "Windows SAPI is unavailable. Speech is off."
+        log.error(note.message)
+        return NullEngine()
+
     return NullEngine()

@@ -126,8 +126,17 @@ class PiperEngine(TTSEngine):
             return []
         return sorted(p.stem for p in self.voices_dir.glob("*.onnx"))
 
+    @property
+    def load_error(self) -> str | None:
+        """Why this engine cannot load, or None when it can."""
+
+        if self._voice is None:
+            self._load()  # populates _load_error if it is still unset
+        return None if self._voice is not None else self._load_error
+
+    @property
     def describe(self) -> str:
-        if self._load_error:
+        if self.load_error:
             return f"{self.name}: unavailable"
         return f"{self.name} / {self.voice_name}"
 

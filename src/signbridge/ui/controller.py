@@ -211,10 +211,33 @@ class Controller(QObject):
         return self._state.speech
 
     @Property(str, notify=stateChanged)
+    def speechNote(self) -> str:
+        """Why speech is not doing what the selector says it is."""
+
+        note = self.engine.speech.note
+        return note.message if note.degraded else ""
+
+    @Property(str, notify=stateChanged)
+    def sourceKind(self) -> str:
+        """Stable id for the source selector.
+
+        The UI used to infer this by searching the display label for the word
+        "Clip", but the label shows the file name once one is loaded, so the
+        selector highlighted the wrong entry and looked broken.
+        """
+
+        return self._state.source.value
+
+    @Property(bool, notify=stateChanged)
+    def hasClip(self) -> bool:
+        return self._state.source is Source.VIDEO
+
+    @Property(str, notify=stateChanged)
     def sourceLabel(self) -> str:
+        if self._state.source is Source.VIDEO:
+            return Path(self.settings.video_path).name or "No clip loaded"
         return {
             Source.CAMERA: f"Camera {self.settings.camera_index}",
-            Source.VIDEO: self.settings.video_path.rsplit("/", 1)[-1] or "Clip",
             Source.SIMULATED: "Simulated signer",
         }.get(self._state.source, "Camera")
 
@@ -426,6 +449,29 @@ class Controller(QObject):
             return
         self.engine.switch_source(Source.VIDEO, path)
         self.settings.save()
+        self.stateChanged.emit()
+
+    @Slot()
+    def clearClip(self) -> None:
+        """Drop the loaded clip and go back to the simulated signer.
+
+        Kept as its own action so leaving a clip is one click, rather than
+        something you have to know which other button happens to do.
+        """
+
+        self.engine.switch_source(Source.SIMULATED)
+        self.settings.video_path = ""
+        self.settings.save()
+        if self._recognizer_kind == "auto":
+            self._apply_kind("auto")
+        self.stateChanged.emit()
+
+    @Slot()
+    def useCamera(self) -> None:
+        self.engine.switch_source(Source.CAMERA)
+        self.settings.save()
+        if self._recognizer_kind == "auto":
+            self._apply_kind("auto")
         self.stateChanged.emit()
 
 

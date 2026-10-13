@@ -25,7 +25,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ..config import Settings
+# Absolute, not relative: `python -m signbridge.setup` runs this file as
+# __main__, and relative imports above the package root fail in that context.
+from signbridge.config import Settings
 
 HAND_LANDMARKER_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"

@@ -127,9 +127,10 @@ ApplicationWindow {
             }
             StatChip {
                 label: "Voice"
-                value: app.ttsEngine === "off" ? "Muted" : "Ready"
-                accentColor: app.ttsEngine === "off" ? Theme.textFaint : Theme.violet
-                live: app.ttsEngine !== "off"
+                value: app.speechNote !== "" ? "Fallback" : (app.ttsEngine === "off" ? "Muted" : "Ready")
+                accentColor: app.speechNote !== "" ? Theme.warn
+                             : (app.ttsEngine === "off" ? Theme.textFaint : Theme.violet)
+                live: app.speechNote === "" && app.ttsEngine !== "off"
             }
             StatChip {
                 label: "Net"
@@ -267,8 +268,7 @@ ApplicationWindow {
 
                     Segmented {
                         width: 264
-                        current: app.sourceLabel.indexOf("Simulated") >= 0 ? "simulated"
-                                  : app.sourceLabel.indexOf("Clip") >= 0 ? "video" : "camera"
+                        current: app.sourceKind
                         options: [
                             { value: "camera",    label: "Camera" },
                             { value: "video",     label: "Clip" },
@@ -280,6 +280,54 @@ ApplicationWindow {
                     GhostButton {
                         text: "Open..."
                         onClicked: clipDialog.open()
+                    }
+
+                    // One click back to the hand rig, shown only when a clip is
+                    // loaded, which is exactly when leaving it is what you want.
+                    AccentButton {
+                        visible: app.hasClip
+                        text: "Back to demo"
+                        primary: true
+                        implicitWidth: 130
+                        onClicked: app.clearClip()
+                    }
+                }
+
+                // The clip's name, so it is obvious what is playing.
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                    anchors.margins: 14
+                    visible: app.hasClip
+                    width: clipRow.implicitWidth + 24
+                    height: 32
+                    radius: 8
+                    color: Qt.rgba(0, 0, 0, 0.55)
+                    border.width: 1
+                    border.color: Theme.stroke
+
+                    Row {
+                        id: clipRow
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "CLIP"
+                            color: Theme.textFaint
+                            font.family: Theme.sans
+                            font.pixelSize: Theme.fontMicro
+                            font.letterSpacing: 1.0
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, 360)
+                            text: app.sourceLabel
+                            color: Theme.text
+                            font.family: Theme.sans
+                            font.pixelSize: Theme.fontSmall
+                            elide: Text.ElideMiddle
+                        }
                     }
                 }
 
@@ -551,6 +599,16 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         height: 1
                         color: Theme.stroke
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: app.speechNote !== ""
+                        text: app.speechNote
+                        color: Theme.warn
+                        font.family: Theme.sans
+                        font.pixelSize: Theme.fontMicro
+                        wrapMode: Text.WordWrap
                     }
 
                     Segmented {

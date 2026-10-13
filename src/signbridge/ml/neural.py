@@ -130,14 +130,40 @@ class NeuralRecognizer(Recognizer):
 
     # ------------------------------------------------------------- inference
 
+    def _fit_length(self, window: np.ndarray) -> np.ndarray:
+        """Resize a window to the length the graph was trained on.
+
+        The live window length is a user setting and does not have to match the
+        one used at training time. Left padding with zeros is the same encoding
+        used for a missing hand, and keeping the newest frames is right because
+        a sign is identified by how it settles. Without this, a mismatch raises
+        inside the reshape and every prediction fails silently.
+        """
+
+        window = np.asarray(window, dtype=np.float32)
+        if window.ndim == 3:
+            window = window.reshape(-1, window.shape[-1])
+        if window.shape[-1] != self._features:
+            raise ModelMismatch(
+                f"expected {self._features} features per frame, got {window.shape[-1]}"
+            )
+
+        have = window.shape[0]
+        if have == self._window:
+            return window
+        if have > self._window:
+            return window[-self._window :]
+        pad = np.zeros((self._window - have, self._features), dtype=np.float32)
+        return np.concatenate([pad, window], axis=0)
+
     def predict(self, window: np.ndarray) -> SignPrediction:
         if self._session is None or not self._labels:
             return SignPrediction(label="", confidence=0.0)
 
-        batch = window.reshape(1, self._window, self._features).astype(np.float32)
+        batch = self._fit_length(window).reshape(1, self._window, self._features)
         if self._mean is not None and self._std is not None:
             batch = (batch - self._mean) / self._std
-        batch = np.ascontiguousarray(batch)
+        batch = np.ascontiguousarray(batch, dtype=np.float32)
 
         logits = self._session.run(None, {self._input_name: batch})[0]
         scores = np.asarray(logits, dtype=np.float32)
