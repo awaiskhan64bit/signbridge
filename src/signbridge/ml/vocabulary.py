@@ -21,6 +21,7 @@ even when rare.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 
 #: Words a beginner needs before anything else. Kept unconditionally.
@@ -79,15 +80,29 @@ def all_words() -> list[str]:
 
 
 def resolve(available: Iterable[str], limit: int = 500) -> list[str]:
-    """Return the curated words that WLASL actually has, in priority order.
+    """Return `limit` words WLASL actually has, curated words first.
 
-    `available` is the set of glosses present in the index. Unknown words are
-    skipped rather than raising, because a wording change in WLASL should
-    degrade the vocabulary, not stop the app.
+    The curated list leads and is never displaced, so `hello` and the other words
+    a first conversation needs are always present. The remainder is filled by
+    clip count, which is the best available proxy for commonness once the
+    obvious choices are gone. Selection is therefore "everyday first, frequent
+    second" rather than either alone: pure frequency dropped `hello`, because
+    WLASL holds only 13 clips of it, and pure curation caps out around 140.
     """
 
     have = set(available)
-    return [w for w in all_words() if w in have][:limit]
+    curated = [w for w in all_words() if w in have][:limit]
+    if len(curated) >= limit:
+        return curated
+
+    seen = set(curated)
+    counts = Counter(available)
+    ranked = sorted(
+        (w for w in counts if w not in seen),
+        key=lambda w: (-counts[w], w),
+    )
+    filler = [w for w in ranked if w not in seen][: limit - len(curated)]
+    return curated + filler
 
 
 def coverage_report(available: Iterable[str]) -> dict[str, object]:
