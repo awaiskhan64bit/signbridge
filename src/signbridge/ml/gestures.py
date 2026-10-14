@@ -63,32 +63,38 @@ REACH_CLEAR = 0.05
 #: (label, finger pattern, thumb out) for every gesture.
 #:
 #: The pattern is index, middle, ring, pinky with 0 meaning extended and 1 folded.
-#: Thumb out is 1 for a sign that leads with the thumb and 0 for one that tucks
-#: it across the palm.
+#: Thumb out is 1 for a sign that leads with the thumb and 0 for one that tucks it
+#: across the palm.
 #:
 #: One table, because the recogniser's rules and the rig's poses have to agree and
 #: keeping two lists in step by hand is how they drift. Every entry is a real
 #: one-handed sign, and no two share both a finger pattern and a thumb state,
 #: which is the only thing this recogniser can tell apart.
 #:
-#: Order is the order rules and templates are generated in, so the two cannot
-#: disagree about which index belongs to which gesture.
+#: The first six are the originals and are never to be removed. The rest are ASL
+#: signs for words, so the app can say something rather than name a hand shape.
+#: Their hand shapes are the settled pose of each sign: "my name is" is a flat
+#: hand on the chest, "name" is the H of both hands, "how are you" is fists turned
+#: palm up. The movement itself is not in the hand shape, so a word that is
+#: defined by motion rather than posture is approximated by the pose it settles
+#: into. That is a real limit of a static matcher and is worth knowing.
 GESTURES: tuple[tuple[str, tuple[int, int, int, int], int], ...] = (
+    # The original six.
     ("open_palm", (0, 0, 0, 0), 1),
-    ("four", (0, 0, 0, 0), 0),
     ("closed_fist", (1, 1, 1, 1), 0),
-    ("thumbs_up", (1, 1, 1, 1), 1),
     ("pointing_up", (1, 0, 0, 0), 0),
-    ("finger_gun", (1, 0, 0, 0), 1),
+    ("thumbs_up", (1, 1, 1, 1), 1),
     ("victory", (0, 0, 1, 1), 0),
-    ("horns", (0, 0, 1, 1), 1),
-    ("three", (0, 0, 0, 1), 1),
-    ("six", (0, 0, 0, 1), 0),
-    ("pinky_up", (1, 1, 1, 0), 0),
-    ("shaka", (1, 1, 1, 0), 1),
     ("i_love_you", (0, 1, 1, 0), 1),
-    ("hang_ten", (0, 1, 1, 0), 0),
-    ("rock_on", (1, 0, 0, 1), 1),
+    # Words, as ASL signs.
+    ("my", (0, 0, 0, 0), 0),          # flat hand to the chest
+    ("name", (0, 1, 1, 1), 0),        # both hands forming an H
+    ("is", (0, 0, 0, 1), 0),          # index up, held
+    ("i", (0, 0, 0, 1), 1),           # index up, turned back toward the signer
+    ("am", (0, 0, 1, 1), 1),          # flat hand, palm out, drawn in
+    ("happy", (0, 1, 1, 1), 1),       # flat hand brushing up the chest
+    ("how", (1, 1, 1, 0), 0),         # fists, palms up, shrugged
+    ("are_you", (1, 1, 0, 1), 1),     # fists turned forward, then a point at you
 )
 
 LABELS = tuple(label for label, _, _ in GESTURES)

@@ -63,6 +63,12 @@ class Glossary:
         "pointing_up": "up",
         "victory": "peace",
         "closed_fist": "stop",
+        # The word signs. Most fall through to the label with its underscores
+        # replaced, which is already right. The pronoun needs saying explicitly or
+        # a synthesiser reads the letter.
+        "i": "I",
+        "am": "am",
+        "are_you": "are you",
         # Common dataset labels that need phrasing rather than underscores.
         "thank_you": "thank you",
         "good_morning": "good morning",

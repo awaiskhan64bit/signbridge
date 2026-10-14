@@ -52,9 +52,25 @@ def _window_for(pose, hold: int = 12) -> np.ndarray:
     )
 
 
-def test_the_book_holds_fifteen_gestures():
-    assert label_count() == EXPECTED_GESTURES == 15
-    assert len(set(labels())) == 15, "duplicate gesture names"
+def test_the_book_holds_the_original_six_plus_the_word_signs():
+    assert label_count() == EXPECTED_GESTURES == 14
+    assert len(set(labels())) == 14, "duplicate gesture names"
+
+
+def test_every_gesture_speaks_an_ordinary_word():
+    """A gesture the app can only announce as a hand shape name is not useful.
+
+    The word signs exist so the app can say something, so each one has to reach
+    the synthesiser as a word. The pronoun is the case that needs saying
+    explicitly, because a lowercase "i" is read as the letter.
+    """
+
+    from signbridge.ml.base import Glossary
+
+    for label in ("my", "name", "is", "i", "am", "happy", "how", "are_you"):
+        assert label in labels(), f"{label} is missing from the book"
+    assert Glossary.say("i") == "I"
+    assert Glossary.say("are_you") == "are you"
 
 
 def test_the_six_original_gestures_are_still_present():
