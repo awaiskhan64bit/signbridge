@@ -130,6 +130,33 @@ class Controller(QObject):
         # UI shows which engine is actually running rather than claiming ML.
         return GestureRecognizer(self.settings.min_sign_confidence)
 
+    def _gesture_source_warning(self) -> str | None:
+        """Why gestures will sit at zero confidence, when that is what will happen.
+
+        The bundled gesture templates are synthetic poses. They match the demo rig
+        exactly and they do not match a camera at all, which was measured rather
+        than assumed: real WLASL hands sit a median 1.44 away from the nearest
+        template against a tolerance of 0.55, so every real hand scored zero.
+
+        Rebuilding them from real corpus hands was tried and is also not enough.
+        Static hand shape does not separate six signs: across a range of
+        tolerances, held-out precision ran 44 to 60% while 33 to 58% of real hands
+        from words that are not in the book were accepted anyway. A recognizer in
+        that state names the wrong gesture more often than the right one, so the
+        honest thing is to say so rather than to show a confidence of zero and
+        leave the user to work out what it means.
+        """
+
+        if self._recognizer_kind != "gestures":
+            return None
+        if self.settings.source == Source.SIMULATED:
+            return None
+        return (
+            "Gestures only work in the demo rig. On a camera they match real "
+            "hands too loosely to name anything, so confidence stays at 0. "
+            "Switch to Words for camera input."
+        )
+
     @Property(str, notify=stateChanged)
     def recognizerLabel(self) -> str:
         return self._state.recognizer or self._recognizer.status()
@@ -424,6 +451,10 @@ class Controller(QObject):
     def _apply_kind(self, kind: str) -> None:
         self._recognizer_kind = kind
         self.engine.set_recognizer(self._build_recognizer(kind))
+        warning = self._gesture_source_warning()
+        if warning:
+            self._state.error = warning
+            self.stateChanged.emit()
 
     @Slot()
     def flushPhrase(self) -> None:
