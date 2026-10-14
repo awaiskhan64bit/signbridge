@@ -39,11 +39,25 @@ Requires Python 3.10 to 3.12 on Windows.
 
 ### One click
 
-Clone the repo, double click **`quickstart.bat`**, and it does the rest: creates
-a virtual environment, installs the dependencies, downloads the models and voice,
-and starts the app. Run it again after an update and it skips whatever is already
-done. Needs internet for the setup itself; after that the app makes no network
-calls at all.
+Clone the repo, double click **`quickstart.bat`**, and it does the rest:
+
+- installs **Python 3.12** if the machine has none, via `winget`
+- creates a virtual environment and installs every dependency
+- downloads the models and the voice
+- puts a **SignBridge shortcut on your Desktop**
+- starts the app
+
+Run it again after an update and it skips whatever is already done. Needs internet
+for the setup itself; after that the app makes no network calls at all.
+
+| Flag | Effect |
+| --- | --- |
+| `--no-python` | Never install Python. Use what is already there, or fail. |
+| `--shortcut-only` | Skip straight to creating the Desktop shortcut. |
+
+Python is only installed if it is genuinely missing, and the script says so on
+screen while it happens. If `winget` is unavailable it stops and prints the manual
+link rather than trying anything else.
 
 ### By hand
 
