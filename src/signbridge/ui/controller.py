@@ -376,14 +376,15 @@ class Controller(QObject):
     def confidenceFloor(self) -> float:
         """Lowest confidence the loaded model will speak at.
 
-        Reported to the UI so the slider cannot be parked below the model's own
-        calibrated threshold, which is what made the app speak confident nonsense.
+        This is now the floor the user chose, not the model's calibrated cut. The
+        calibrated value used to be pinned here so the slider could only ever
+        raise the bar, which meant a model whose calibration landed on a noisy
+        tail was stuck above its own useful operating point and could not be
+        loosened by hand. The calibrated cut is still the slider's default, so
+        loosening is a deliberate act rather than the default behaviour.
         """
 
-        floor = getattr(self._recognizer, "default_threshold", None)
-        if not floor:
-            return 0.02
-        return float(min(floor, 0.95))
+        return max(0.02, self.settings.min_sign_confidence)
 
     # ----------------------------------------------------------------- slots
 
@@ -460,13 +461,12 @@ class Controller(QObject):
 
     @Slot(float)
     def setMinConfidence(self, value: float) -> None:
-        # Strictness only. The model measured a confidence cut that maximises
-        # precision on the clips it accepts, and a slider below that is not a
-        # looser setting, it is ignoring the calibration. Clamp to the floor and
-        # let the user raise it as high as they like.
-        floor = self.confidenceFloor
-        value = max(floor, min(0.95, value))
-        self._set_float("min_sign_confidence", value, 0.02, 0.95)
+        # The slider now moves the cut across its whole useful range. It used to
+        # be clamped from below by the model's calibrated threshold, which made it
+        # impossible to loosen a model whose calibration had landed badly. The
+        # calibrated cut is the starting position instead, so a chattier setting is
+        # something you choose rather than something the app decides for you.
+        self._set_float("min_sign_confidence", max(0.02, min(0.95, value)), 0.02, 0.95)
         with self.engine._lock:
             self.engine.recognizer = self._build_recognizer(self._recognizer_kind)
 

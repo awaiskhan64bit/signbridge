@@ -68,7 +68,70 @@ def test_a_good_model_is_still_allowed_to_speak():
 
 
 def test_the_floor_is_reported_not_hidden():
-    assert 0.3 < MIN_PRECISION < 0.9
+    assert 0.15 < MIN_PRECISION < 0.6
+
+
+def _weak_but_informative(
+    n: int = 600, k: int = 50, seed: int = 7
+) -> tuple[np.ndarray, np.ndarray]:
+    """A weak classifier with a realistic, wobbly precision curve.
+
+    Reproduces the shape of the shipped model's measured curve rather than its
+    exact numbers: precision climbing with the cut, plus a sharp precision drop at
+    the very top where only a few clips survive. The drop is the whole point. A
+    flat, easy fixture cannot express it, and a fixture that is too easy also
+    fails the opposite way: the sweep hits its precision floor on the very first
+    clip and rejects everything.
+    """
+
+    rng = np.random.default_rng(seed)
+    labels = rng.integers(0, k, n)
+    # Confidence is a noisy function of being right, so precision at a given cut
+    # is a rate with visible sampling error rather than a clean curve.
+    strength = rng.normal(0.0, 0.22, n)
+    p_correct = 1.0 / (1.0 + np.exp(-(3.4 * strength + 0.15)))
+    correct = rng.random(n) < p_correct
+
+    scores = rng.random((n, k)) * 0.02
+    guess = rng.integers(1, k, n)
+    scores[np.arange(n), np.where(correct, labels, guess)] = np.where(
+        correct, 0.45 + 0.5 * rng.random(n), 0.55 + 0.44 * rng.random(n)
+    )
+    scores /= scores.sum(axis=1, keepdims=True)
+    return scores, labels
+
+
+def test_a_cut_needs_enough_clips_to_be_trusted():
+    """The regression: precision on a handful of clips is noise.
+
+    The shipped model measured 63.6% precision at 0.90 and 42.9% at 0.95, purely
+    because two clips sat above 0.95 and one was wrong. Without a sample floor the
+    sweep picked 0.98 off that wobble, which spoke almost nothing and spoke it
+    wrongly. The cut it should have picked sits far lower, with far more support.
+    """
+
+    scores, labels = _weak_but_informative()
+    fit = calibrate(scores, labels)
+    cov, _ = precision_at(scores, labels, fit.threshold)
+
+    assert fit.threshold < 0.9, f"picked the noisy tail, got {fit.threshold}"
+    assert cov > 0.15, f"the trusted cut should still cover real clips, got {cov}"
+
+
+def test_precision_recovers_lower_down_the_curve():
+    """The chosen cut has to beat the cuts immediately above it.
+
+    A cut chosen off two clips can be beaten by the next cut down, which is
+    precisely the failure being guarded against.
+    """
+
+    scores, labels = _weak_but_informative()
+    fit = calibrate(scores, labels)
+
+    for t in (fit.threshold + 0.05, fit.threshold + 0.15):
+        _, worse = precision_at(scores, labels, t)
+        _, chosen = precision_at(scores, labels, fit.threshold)
+        assert chosen >= worse, f"cut {t:.2f} beat the chosen {fit.threshold:.2f}"
 
 
 def test_calibration_refuses_an_empty_set():

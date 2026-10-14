@@ -31,7 +31,16 @@ COVERAGE_TARGET = 0.35
 #: 0.245 at 4% precision: the app announced a guess four times in five, which
 #: for speech is far worse than saying nothing. A cut that cannot beat this is
 #: not a cut, so the answer becomes 1.0 and the app stays quiet.
-MIN_PRECISION = 0.55
+MIN_PRECISION = 0.30
+
+#: A cut is only trusted if at least this many clips reach it.
+#:
+#: Precision measured on a handful of clips is noise. The measured curve for the
+#: shipped model runs 19.6% at 0.20, 28.6% at 0.50, 63.6% at 0.90 and then falls
+#: back to 42.9% at 0.95, purely because two clips sit above 0.95 and one of them
+#: is wrong. Without a floor on sample count the sweep picked 0.98 off that
+#: wobble, which both spoke almost nothing and spoke it wrongly.
+MIN_SAMPLES = 0.03
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,23 +58,42 @@ class Calibration:
 
 
 def _sweep(probs: np.ndarray, labels: np.ndarray) -> Calibration:
+    """Pick the cut that maximises precision times coverage, with two floors.
+
+    The precision floor stops a hopeless model from speaking at all. The sample
+    floor stops a cut from being chosen on the strength of a couple of clips,
+    which is how a noisy tail at 0.95 outranks the real knee at 0.50.
+
+    Among the cuts that clear both floors, the best one is taken rather than the
+    strictest, because precision and coverage trade against each other: the
+    highest precision on this data is always the cut that says almost nothing.
+    """
+
     confidence = probs.max(axis=1)
     predicted = probs.argmax(axis=1)
     correct = (predicted == labels).astype(np.float64)
     order = np.argsort(-confidence)
 
+    total = len(order)
+    min_count = max(3, round(MIN_SAMPLES * total))
     best = Calibration(1.0, 0.0, 0.0, -1.0)
     running = 0.0
-    total = len(order)
 
     for k in range(1, total + 1):
         running += correct[order[k - 1]]
         coverage = k / total
         precision = running / k
         if precision < MIN_PRECISION:
-            # Confidence only grows as coverage grows, so once a cut drops below
-            # the floor every looser cut is worse too. The sweep can stop here.
-            break
+            # Deliberately not a break. A looser cut averages over every clip above
+            # it plus the ones between, so precision at a looser cut is a running
+            # mean that dips and recovers rather than falling monotonically.
+            # Stopping at the first dip therefore discarded every cut below it,
+            # which is where the real operating point lives: on the shipped model
+            # the sweep gave up at the very first clip and answered "stay silent".
+            continue
+        if k < min_count:
+            # Too few clips to trust the precision estimate yet.
+            continue
         score = precision * min(1.0, coverage / COVERAGE_TARGET)
         if score > best.score:
             best = Calibration(

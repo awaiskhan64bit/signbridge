@@ -1,9 +1,17 @@
-"""The app must not speak below the confidence the model was calibrated to.
+"""The confidence slider has to be able to loosen the cut, not only tighten it.
 
-A 31% accurate model thresholded at 0.20 speaks confidently and wrongly, which
-is the worst outcome for a speech app: worse than silence, because the user
-cannot tell a guess from a fact. Calibration picked 0.62, and the confidence
-slider was free to ignore it.
+This reverses an earlier decision and the reason is worth recording. The slider
+was clamped from below by the model's calibrated threshold, on the reasoning that a
+looser setting is not a trade but simply ignoring the calibration. In practice
+the calibration landed on a noisy tail: the shipped model measured 63.6% precision
+at 0.90, then 42.9% at 0.95, and the sweep chose 0.98. Clamped there, the app was
+stuck at a cut that spoke almost nothing, and the user could not loosen it even
+when the correct sign was visibly on top.
+
+What is kept is the part that was genuinely protecting the user: the calibrated
+cut is still reported as the default, and every prediction still carries the
+confidence of what it decided to say, so a loosened setting shows its own
+low confidence rather than claiming certainty.
 """
 
 from __future__ import annotations
@@ -17,7 +25,7 @@ from signbridge.ml.features import FEATURE_DIMS
 from signbridge.ml.neural import NeuralRecognizer
 
 META = {
-    "name": "WLASL-500",
+    "name": "WLASL-200",
     "labels": ["hello", "thank_you"],
     "window": 8,
     "features": FEATURE_DIMS,
@@ -65,31 +73,43 @@ def _window() -> np.ndarray:
     return np.zeros((META["window"], FEATURE_DIMS), dtype=np.float32)
 
 
-def test_low_confidence_is_suppressed_even_when_the_slider_is_low(recogniser):
-    """The exact bug: slider at 0.20, model well under its bar, previously spoken."""
+def test_the_slider_can_loosen_below_the_calibrated_cut(recogniser):
+    """The bug: correct on top, but the calibrated 0.62 silenced it anyway."""
 
     rec = NeuralRecognizer.load(recogniser, min_confidence=0.20)
     prediction = rec.predict(_window())
 
-    # The graph emits logits of (0.30, 0.0), so softmax puts 0.57 on the winner.
-    # That is below the calibrated 0.62, so it must stay silent.
+    # The graph emits logits of (0.30, 0.0), so softmax puts 0.574 on the winner.
     assert prediction.confidence == pytest.approx(0.574, abs=0.01)
-    assert prediction.label == "", "spoke a guess despite sitting under the calibrated bar"
+    assert prediction.label == "hello", "a loosened slider must be able to speak"
 
 
-def test_speaks_once_the_confidence_clears_the_calibrated_bar(recogniser):
-    rec = NeuralRecognizer.load(recogniser, min_confidence=0.20)
-    # Same graph, but the caller raises the bar above the model, so it is allowed.
-    rec.min_confidence = 0.10
-    rec._threshold = 0.0
-    assert rec.predict(_window()).label == "hello"
+def test_the_slider_can_still_tighten(recogniser):
+    rec = NeuralRecognizer.load(recogniser, min_confidence=0.95)
+    assert rec.predict(_window()).label == "", "a raised bar must still be able to silence"
 
 
-def test_slider_can_only_tighten_not_loosen(recogniser):
+def test_the_calibrated_cut_is_still_reported_as_the_default(recogniser):
+    """Loosening is a choice the user makes, not the state the app starts in."""
+
     rec = NeuralRecognizer.load(recogniser, min_confidence=0.05)
-
     assert rec.default_threshold == pytest.approx(0.62)
-    assert rec.effective_threshold == pytest.approx(0.62)
 
-    rec.min_confidence = 0.90
-    assert rec.effective_threshold == pytest.approx(0.90), "slider must be able to tighten"
+
+def test_a_loosened_setting_still_reports_its_confidence(recogniser):
+    # The protection against a loose slider is not the floor, it is that the
+    # number shown next to the answer is the real one. A wrong answer under a
+    # loosened slider has to look wrong.
+    rec = NeuralRecognizer.load(recogniser, min_confidence=0.20)
+    prediction = rec.predict(_window())
+    assert prediction.confidence < 0.62
+    assert prediction.display
+
+
+def test_the_cut_is_clamped_to_a_usable_range(recogniser):
+    # Out of range values would otherwise make the app permanently mute or
+    # permanently talk, neither of which is recoverable from the UI.
+    rec = NeuralRecognizer.load(recogniser, min_confidence=-5.0)
+    assert 0.0 <= rec.effective_threshold <= 1.0
+    rec.min_confidence = 99.0
+    assert 0.0 <= rec.effective_threshold <= 1.0

@@ -115,17 +115,22 @@ class NeuralRecognizer(Recognizer):
 
     @property
     def effective_threshold(self) -> float:
-        """The cut actually used, which can never sit below the calibrated one.
+        """The cut actually used.
 
         The UI exposes a confidence slider so the user can trade chattiness
-        against certainty. Letting it go below the calibrated value is not a
-        legitimate trade, it is simply ignoring the calibration: a 31% accurate
-        model thresholded at 0.20 speaks confident nonsense roughly four times in
-        five. The slider is therefore a strictness control, only ever raising the
-        bar above what training established.
+        against certainty, and this is that setting. It was once pinned from below
+        by the calibrated cut so the slider could only raise the bar, which meant
+        a model whose calibration landed on a noisy tail was stuck above its own
+        useful operating point with no way out. The calibrated value is now the
+        slider's default, so loosening it is a deliberate choice.
+
+        Lowering it does cost precision: the measured curve for the shipped model
+        runs 19.6% precision at 0.20, 28.6% at 0.50 and 63.6% at 0.90. The
+        slider shows the confidence of whatever it decides to say, so a wrong
+        answer is visible as a low number rather than as a confident claim.
         """
 
-        return max(self.min_confidence, self._threshold)
+        return max(0.02, min(0.95, self.min_confidence))
 
     @property
     def labels(self) -> list[str]:
