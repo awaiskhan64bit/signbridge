@@ -1,4 +1,5 @@
 # SignBridge
+(took hours to train on an RTX 5060 the computer vision model is made from scratch my gpu has suffered)
 
 An offline desktop app that watches your webcam, reads your signing, and says it
 out loud.
