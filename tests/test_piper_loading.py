@@ -82,7 +82,56 @@ class TestWarming:
         assert engine.synthesize("hello") is None
 
 
-class TestServiceWarmsOnSelection:
+class TestStatusIsCheap:
+    """The freeze, as a test.
+
+    The engine's status line is refreshed on every processed frame. `load_error`
+    used to attempt a load, so turning Piper on made every single frame try to
+    build an ONNX session. The preview froze while recognition carried on, because
+    the capture and decode threads still ran and only the status refresh was
+    thrashing.
+    """
+
+    def test_describe_does_not_load_the_voice(self, voices):
+        engine = PiperEngine(voices)
+        for _ in range(50):  # fifty frames' worth of status refreshes
+            _ = engine.describe
+        assert engine._voice is None, "reading the status loaded the model"
+
+    def test_status_is_stable_when_the_voice_is_missing(self, tmp_path):
+        engine = PiperEngine(tmp_path / "voices")
+        assert "unavailable" in engine.describe
+        assert "unavailable" in engine.describe
+
+    def test_status_reports_the_voice_once_it_is_known(self, voices):
+        engine = PiperEngine(voices)
+        assert "en_US-lessac-medium" in engine.describe
+
+    def test_load_error_does_not_start_a_load(self, voices):
+        engine = PiperEngine(voices)
+        assert engine.load_error is None or "not downloaded" in engine.load_error
+        assert engine._voice is None
+
+    def test_concurrent_warm_and_use_load_only_once(self, voices):
+        import threading
+
+        engine = PiperEngine(voices)
+        results: list[int] = []
+
+        def use() -> None:
+            for _ in range(5):
+                results.append(len(results))
+                engine._load()
+
+        threads = [threading.Thread(target=use) for _ in range(3)]
+        engine.warm()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        # Whether the fake file loads or not, no thread may have raised, and the
+        # lock means they took turns rather than racing.
+        assert len(results) == 15
     def test_set_engine_warms_the_new_engine(self):
         from signbridge.speech.service import SpeechService
 

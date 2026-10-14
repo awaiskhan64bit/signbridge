@@ -74,6 +74,9 @@ class PiperEngine(TTSEngine):
         self._voice = None
         self._kind = "wave"
         self._lock = threading.Lock()
+        #: Guards loading only, so a warm thread and a caller cannot build two
+        #: sessions for the same voice.
+        self._load_lock = threading.Lock()
         self._sample_rate = 22_050
         self._load_error: str | None = None
         self._warming = False
@@ -130,6 +133,13 @@ class PiperEngine(TTSEngine):
         threading.Thread(target=_work, name="piper-warm", daemon=True).start()
 
     def _load(self):
+        # Serialised. `warm` loads on a background thread while the speech thread
+        # may ask for a voice at the same moment, and two threads reading the same
+        # ONNX file into two sessions doubles the cost and wastes one of them.
+        with self._load_lock:
+            return self._load_locked()
+
+    def _load_locked(self):
         if self._voice is not None:
             return self._voice
         if not self.model_path.exists() or not self.config_path.exists():
@@ -167,11 +177,27 @@ class PiperEngine(TTSEngine):
 
     @property
     def load_error(self) -> str | None:
-        """Why this engine cannot load, or None when it can."""
+        """Why this engine cannot load, or None when it can.
 
-        if self._voice is None:
-            self._load()  # populates _load_error if it is still unset
-        return None if self._voice is not None else self._load_error
+        Deliberately does not attempt a load. This is read every frame through
+        `describe`, because the engine's status line is refreshed on each one, and
+        a property that loads a model turns a thirty times a second status update
+        into thirty model loads a second. That is what froze the camera preview
+        after Piper was enabled: the preview stopped while recognition carried on,
+        because the capture and decode threads still ran and only the status
+        refresh was thrashing.
+        """
+
+        if self._voice is not None:
+            return None
+        if self._load_error is not None:
+            return self._load_error
+        if not (self.model_path.exists() and self.config_path.exists()):
+            return (
+                f"Voice {self.voice_name} is not downloaded. "
+                "Run: python -m signbridge.setup --voices"
+            )
+        return None
 
     def resolve(self) -> str | None:
         """Substitute an installed voice when the chosen one is missing.
