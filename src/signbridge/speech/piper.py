@@ -76,6 +76,7 @@ class PiperEngine(TTSEngine):
         self._lock = threading.Lock()
         self._sample_rate = 22_050
         self._load_error: str | None = None
+        self._warming = False
 
     # ------------------------------------------------------------- lifecycle
 
@@ -88,7 +89,45 @@ class PiperEngine(TTSEngine):
         return self.voices_dir / f"{self.voice_name}.onnx.json"
 
     def available(self) -> bool:
-        return self._load() is not None
+        """Whether this engine can speak, without paying to load the voice.
+
+        Loading a Piper voice reads a neural model off disk and builds an
+        inference session, which takes seconds. Doing that here froze the entire
+        UI, because engine selection runs on the UI thread: a frozen UI looks
+        exactly like a stalled camera, no frames and no error to explain it. So
+        this answers from the files and the import, and the weights are loaded
+        later on the speech thread by `warm`.
+        """
+
+        if self._voice is not None:
+            return True
+        if not (self.model_path.exists() and self.config_path.exists()):
+            return False
+        try:
+            _load_piper()
+        except Exception as exc:
+            self._load_error = f"Piper is not available: {exc}"
+            return False
+        return True
+
+    def warm(self) -> None:
+        """Load the voice on a background thread.
+
+        Called after selection so the first sign is not delayed by a model load,
+        and so that load never runs on the thread that draws the UI.
+        """
+
+        if self._voice is not None or self._warming:
+            return
+        self._warming = True
+
+        def _work() -> None:
+            try:
+                self._load()
+            finally:
+                self._warming = False
+
+        threading.Thread(target=_work, name="piper-warm", daemon=True).start()
 
     def _load(self):
         if self._voice is not None:

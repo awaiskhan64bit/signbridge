@@ -141,6 +141,13 @@ class SpeechService:
         self.engine = engine
         if note is not None:
             self.note = note
+        # Load the voice now, on a background thread, rather than on the first
+        # sign. Doing it lazily meant the very first phrase paid a multi-second
+        # stall, and doing it eagerly on the caller's thread froze the UI, which
+        # reads as the camera hanging.
+        warm = getattr(engine, "warm", None)
+        if callable(warm):
+            warm()
 
     @property
     def busy(self) -> bool:
