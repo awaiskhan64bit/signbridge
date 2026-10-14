@@ -7,7 +7,6 @@ plays a clip through the real capture path and reports both.
 
 from __future__ import annotations
 
-import glob
 import sys
 from collections import Counter
 from pathlib import Path
@@ -26,11 +25,18 @@ MIN_FRAMES = 8
 
 
 def main() -> int:
-    paths = glob.glob(r"C:\Users\awais\Downloads\HOW TO SIGN*.mp4")
-    if not paths:
-        print("no clip found in Downloads")
+    # A clip is passed in rather than searched for. This used to glob the
+    # author's own Downloads folder for a personal video file, which put a
+    # username and a private filename into the repository.
+    if len(sys.argv) < 2:
+        print("usage: check_on_clip.py <video file>")
+        print("  Runs the shipped model over a recorded clip and reports what it")
+        print("  would have said on every frame.")
+        return 2
+    video = sys.argv[1]
+    if not Path(video).exists():
+        print(f"no such file: {video}")
         return 1
-    video = paths[0]
     print(f"clip        : {Path(video).name}")
 
     rec = NeuralRecognizer.load(MODEL, min_confidence=0.0)
