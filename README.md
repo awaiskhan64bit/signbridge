@@ -37,6 +37,16 @@ python -m signbridge --source simulated
 
 Requires Python 3.10 to 3.12 on Windows.
 
+### One click
+
+Clone the repo, double click **`quickstart.bat`**, and it does the rest: creates
+a virtual environment, installs the dependencies, downloads the models and voice,
+and starts the app. Run it again after an update and it skips whatever is already
+done. Needs internet for the setup itself; after that the app makes no network
+calls at all.
+
+### By hand
+
 ```bash
 git clone <this repo>
 cd signbridge
@@ -53,11 +63,58 @@ python -m signbridge                # start the app
 Windows SAPI and recognition falls back to a small built in gesture vocabulary.
 The `[tts]` extra adds Piper, which is what makes the voice sound like a person.
 
+### Building a standalone executable
+
+`signbridge.spec` is a PyInstaller build that produces `dist/SignBridge/SignBridge.exe`
+with no Python required on the target machine.
+
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm signbridge.spec
+```
+
+**This build is unverified.** PyInstaller is not a project dependency and has not
+been run against this codebase, so treat the spec as a starting point rather than
+a known good recipe. The two things most likely to need fixing are the QML files,
+which are force-included because they are loaded from disk at runtime, and
+MediaPipe's lazily imported modules.
+
+It builds a folder rather than a single exe on purpose. PySide6, MediaPipe and
+ONNX Runtime together are over a gigabyte of shared libraries, and a one file
+build unpacks all of that into a temp directory on every launch. Zip the folder
+instead.
+
+The models and voice are not bundled. They are downloaded once into the user's own
+app data, so assets can be updated without rebuilding the executable.
+
 ## Using it
 
 | Action | How |
 | --- | --- |
-| Start and stop | `Space`, or the button top right |
+## Known limits
+
+Worth stating plainly rather than discovering them later.
+
+**Word recognition is weak.** On held out clips the classifier is right about 7%
+of the time at 200 words, and about 16% at 50. That is far below published WLASL
+results, and the reason is data rather than architecture: the corpus gives about
+twelve training clips per word. Signs performed by different people vary more than
+that supports. Fewer words is genuinely more accurate, so the vocabulary setting
+is worth lowering if accuracy matters more than range.
+
+**The confidence cut is calibrated for that weak model**, so it accepts roughly a
+quarter of clips at about 29% precision. It speaks wrong more often than right by
+design, because silence was measured to be less useful. Every prediction shows
+its own confidence so a wrong answer looks wrong.
+
+**Gestures work on the camera. Words are the weak part.** The gesture recogniser
+decides from finger curl and thumb reach, which survive the difference between a
+real hand and a synthetic one; the earlier template matcher scored exactly zero on
+a real clip.
+
+**The gesture book is six**, and that is a deliberate limit. It is small because
+it is a rule set, and it can be extended, but each addition needs a finger pattern
+and thumb state that no existing gesture already uses.
 | Speak the current phrase | `Ctrl+Enter` |
 | Repeat the last phrase | `Ctrl+R` |
 | Change input source | Camera / Clip / Demo, top right of the viewport |
