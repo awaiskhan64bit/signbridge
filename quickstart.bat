@@ -97,10 +97,16 @@ if errorlevel 1 (
 )
 
 REM ------------------------------------------------------------------- start
+REM The path is made absolute before handing it to `start`. `start` resolves a
+REM relative path against its own working directory rather than this script's,
+REM so passing ".venv\Scripts\python.exe" there fails with a message that points
+REM at the wrong thing entirely.
+for %%i in ("%PY%") do set "PYABS=%%~fi"
+
 echo.
 echo   Starting SignBridge.
 echo.
-start "" "%PY%" -m signbridge %*
+start "SignBridge" "%PYABS%" -m signbridge %*
 echo   The app is starting. This window can be closed.
 timeout /t 3 >nul
 endlocal
