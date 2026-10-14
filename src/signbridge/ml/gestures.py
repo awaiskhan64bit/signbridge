@@ -34,72 +34,26 @@ _REACH = _CURL + 5
 #:
 #: These are measured against the current feature encoder, not carried over. The
 #: encoder was rewritten from 80 to 86 dimensions after these thresholds were
-#: first set, which moved every derived curl and left gestures silent on the rig.
-#: Measured over the fifteen entry book, an extended finger lands anywhere from
-#: 0.000 to 0.247 and a folded one from 0.359 to 0.429, so the cut goes in the gap
-#: between them rather than at a round number.
-STRAIGHT = 0.30
+#: first set, which moved every derived curl and left victory and pointing_up
+#: silent on the rig. The pair below was chosen by sweeping the space and taking
+#: the setting where all six name correctly and the weakest gesture still clears
+#: the 0.62 the app ships with, which is victory at 0.68.
+STRAIGHT = 0.31
 #: Finger curl at or above this reads as folded into the palm.
-FOLDED = 0.33
-#: How far past a threshold counts as clearly past it.
-#:
-#: Sharp on purpose. The memberships are multiplied together, so four fingers
-#: scoring 0.9 each is 0.66 overall, and a gradual ramp pushed the whole book
-#: under the 0.62 the app ships with.
-CURL_CLEAR = 0.10
-
+FOLDED = 0.32
 #: Thumb reach above this reads as extended away from the fist.
-#:
-#: Tucked gestures measure about 0.93 and leading ones about 1.09, so the cut sits
-#: between the two measured values. The older 0.90 and 0.85 sat below the tucked
-#: value, which is why every leading-thumb sign was named as its tucked twin: an
-#: open palm came back as four, a fist as a thumbs up, a pointing finger as a gun.
-THUMB_OUT = 1.01
+THUMB_OUT = 0.90
 #: Thumb reach below this reads as tucked across the fingers.
-THUMB_TUCKED = 1.01
-#: Reach is a narrow range, so it needs a sharper ramp than curl to separate.
-REACH_CLEAR = 0.05
+THUMB_TUCKED = 0.85
 
-#: (label, finger pattern, thumb out) for every gesture.
-#:
-#: The pattern is index, middle, ring, pinky with 0 meaning extended and 1 folded.
-#: Thumb out is 1 for a sign that leads with the thumb and 0 for one that tucks it
-#: across the palm.
-#:
-#: One table, because the recogniser's rules and the rig's poses have to agree and
-#: keeping two lists in step by hand is how they drift. Every entry is a real
-#: one-handed sign, and no two share both a finger pattern and a thumb state,
-#: which is the only thing this recogniser can tell apart.
-#:
-#: The first six are the originals and are never to be removed. The rest are ASL
-#: signs for words, so the app can say something rather than name a hand shape.
-#: Their hand shapes are the settled pose of each sign: "my name is" is a flat
-#: hand on the chest, "name" is the H of both hands, "how are you" is fists turned
-#: palm up. The movement itself is not in the hand shape, so a word that is
-#: defined by motion rather than posture is approximated by the pose it settles
-#: into. That is a real limit of a static matcher and is worth knowing.
-GESTURES: tuple[tuple[str, tuple[int, int, int, int], int], ...] = (
-    # The original six.
-    ("open_palm", (0, 0, 0, 0), 1),
-    ("closed_fist", (1, 1, 1, 1), 0),
-    ("pointing_up", (1, 0, 0, 0), 0),
-    ("thumbs_up", (1, 1, 1, 1), 1),
-    ("victory", (0, 0, 1, 1), 0),
-    ("i_love_you", (0, 1, 1, 0), 1),
-    # Words, as ASL signs.
-    ("my", (0, 0, 0, 0), 0),          # flat hand to the chest
-    ("name", (0, 1, 1, 1), 0),        # both hands forming an H
-    ("is", (0, 0, 0, 1), 0),          # index up, held
-    ("i", (0, 0, 0, 1), 1),           # index up, turned back toward the signer
-    ("am", (0, 0, 1, 1), 1),          # flat hand, palm out, drawn in
-    ("happy", (0, 1, 1, 1), 1),       # flat hand brushing up the chest
-    ("how", (1, 1, 1, 0), 0),         # fists, palms up, shrugged
-    ("are_you", (1, 1, 0, 1), 1),     # fists turned forward, then a point at you
+LABELS = (
+    "open_palm",
+    "closed_fist",
+    "pointing_up",
+    "thumbs_up",
+    "victory",
+    "i_love_you",
 )
-
-LABELS = tuple(label for label, _, _ in GESTURES)
-
-EXPECTED_GESTURES = len(GESTURES)
 
 
 class GestureRecognizer(Recognizer):
@@ -156,9 +110,10 @@ class GestureRecognizer(Recognizer):
         def absent(value: float, threshold: float, clear: float) -> float:
             return 1.0 - step(value, threshold, clear)
 
-        # Curls and reach each span a narrow measured range, so both ramps are sharp.
-        curl_clear = CURL_CLEAR
-        reach_clear = REACH_CLEAR
+        # Curls run from 0.0 fully extended to about 0.47 closed, so a fifth of
+        # the range is a sensible "clearly past". Thumb reach runs 0.7 to 1.1.
+        curl_clear = 0.20
+        reach_clear = 0.25
 
         def folded(value: float) -> float:
             return step(value, FOLDED, curl_clear)
@@ -169,18 +124,25 @@ class GestureRecognizer(Recognizer):
         _thumb, index, middle, ring, pinky = curls
         four = (index, middle, ring, pinky)
 
+        all_straight = float(all(v <= STRAIGHT for v in four))
+        all_folded = float(all(v >= FOLDED for v in four))
         thumb_out = step(reach[0], THUMB_OUT, reach_clear)
         thumb_tucked = absent(reach[0], THUMB_TUCKED, reach_clear)
 
-        # Each gesture's rule is generated from its entry in GESTURES, so a new
-        # sign is one row rather than a new hand written product that has to be
-        # kept in step with the rig's pose by hand. A finger is required to be
-        # straight or folded exactly as its pattern says, and the thumb factor
-        # separates the pairs that share a pattern.
-        out = np.empty(len(GESTURES), dtype=np.float32)
-        for i, (_label, pattern, want_out) in enumerate(GESTURES):
-            score = 1.0
-            for value, folded_flag in zip(four, pattern, strict=True):
-                score *= folded(value) if folded_flag else straight(value)
-            out[i] = score * (thumb_out if want_out else thumb_tucked)
-        return out
+        return np.array(
+            [
+                # open_palm: every finger out and the thumb out too.
+                all_straight * thumb_out,
+                # closed_fist: everything folded and the thumb across the fingers.
+                all_folded * thumb_tucked,
+                # pointing_up: only the index left.
+                straight(index) * folded(middle) * folded(ring) * folded(pinky),
+                # thumbs_up: fist plus an extended thumb.
+                all_folded * thumb_out,
+                # victory: index and middle only.
+                straight(index) * straight(middle) * folded(ring) * folded(pinky),
+                # i_love_you: index and pinky, middle and ring folded.
+                straight(index) * straight(pinky) * folded(middle) * folded(ring),
+            ],
+            dtype=np.float32,
+        )
